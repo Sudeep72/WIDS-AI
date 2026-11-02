@@ -10,11 +10,13 @@ from pathlib import Path
 from wids_ai import __version__
 from wids_ai.capture.base import PcapSource
 from wids_ai.capture.live_source import LiveSource
-from wids_ai.config import load_config
+from wids_ai.config import PROJECT_ROOT, load_config
 from wids_ai.features.extractors import FeatureRow, batch_extract
 from wids_ai.features.windowing import WindowConfig
 from wids_ai.inventory import APInventory
 from wids_ai.logging_config import configure_logging
+from wids_ai.ml.baseline import load_benign_rows
+from wids_ai.ml.isolation_forest import load_model, score_rows, train_isolation_forest, write_scores
 from wids_ai.parser.dot11 import parse_frame
 from wids_ai.rules.engine import deduplicate, evaluate_rules, load_rules, write_detections
 
@@ -31,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("analyze", "Analyze offline PCAP files"),
         ("features", "Extract window features from an offline PCAP"),
         ("baseline", "Build a trusted AP inventory from PCAP"),
+        ("score", "Score windows with a persisted anomaly model"),
         ("train", "Train the baseline anomaly model"),
         ("serve", "Serve the API and dashboard"),
         ("live", "Capture on a Linux monitor-mode interface"),
@@ -45,7 +48,17 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--window-seconds", type=float, default=10.0)
             command.add_argument("--step-seconds", type=float, default=5.0)
         if name == "train":
-            command.add_argument("paths", nargs="+", type=Path)
+            command.add_argument("pcap", type=Path)
+            command.add_argument("--out", type=Path, default=Path("models"))
+            command.add_argument("--seed", type=int, default=42)
+            command.add_argument("--contamination", type=float, default=0.05)
+        if name == "score":
+            command.add_argument("pcap", type=Path)
+            command.add_argument("--model", type=Path, required=True)
+            command.add_argument("--trusted-model-root", type=Path, default=PROJECT_ROOT / "models")
+            command.add_argument("--out", type=Path, required=True)
+            command.add_argument("--window-seconds", type=float, default=10.0)
+            command.add_argument("--step-seconds", type=float, default=5.0)
         if name == "baseline":
             command.add_argument("pcap", type=Path)
             command.add_argument("--out", type=Path, required=True)
@@ -110,6 +123,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         features.to_csv(args.out, index=False)
         LOGGER.info("Wrote %d feature rows to %s", len(features), args.out)
+        return 0
+    if args.command == "train":
+        rows = load_benign_rows(args.pcap)
+        trained = train_isolation_forest(
+            rows,
+            args.out,
+            seed=args.seed,
+            contamination=args.contamination,
+        )
+        print(
+            f"Trained on {trained.metadata.training_window_count} benign windows -> "
+            f"{trained.model_path}"
+        )
+        print(f"Model SHA-256: {trained.metadata.model_sha256}")
+        return 0
+    if args.command == "score":
+        frame_rows = list(parse_frames(PcapSource(args.pcap)))
+        config = WindowConfig(args.window_seconds, args.step_seconds)
+        feature_frame = batch_extract(frame_rows, config)
+        model = load_model(args.model, trusted_base=args.trusted_model_root)
+        scored = score_rows(model, feature_frame)
+        write_scores(scored, args.out)
+        values = [item.anomaly_score for item in scored]
+        print(
+            f"Scored {len(values)} windows: mean={sum(values) / len(values):.4f} "
+            f"max={max(values):.4f} -> {args.out}"
+        )
         return 0
     if args.command == "live":
         source = LiveSource(args.iface, args.channel)

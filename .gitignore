@@ -16,3 +16,5 @@ artifacts/
 .env
 .tmp/
 data/synthetic/
+models/
+eval/
