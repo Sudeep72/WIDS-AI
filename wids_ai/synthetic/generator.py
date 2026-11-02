@@ -403,18 +403,98 @@ SCENARIOS = {
     "karma_probe_responses": _karma,
     "beacon_sequence_anomaly": _beacon_anomaly,
 }
+MIXED_ATTACKS = {
+    "mixed_evil_twin": "evil_twin",
+    "mixed_deauth_burst": "deauth_burst",
+    "mixed_karma_probe_responses": "karma_probe_responses",
+    "mixed_beacon_sequence_anomaly": "beacon_sequence_anomaly",
+}
+MIXED_ATTACK_START_SECONDS = 300.0
+
+
+def _shift_packet(packet: object, seconds: float) -> object:
+    shifted = packet.copy()
+    shifted.time = float(shifted.time) + seconds
+    return shifted
+
+
+def _mixed_labels(
+    scenario: str,
+    benign: ScenarioLabels,
+    attack: ScenarioLabels,
+    shift: float,
+    packet_count: int,
+) -> ScenarioLabels:
+    attack_start = attack.start
+    attack_end = attack.end
+    if attack_start is None or attack_end is None:
+        raise ValueError("Attack labels need start and end timestamps")
+    shifted_start = datetime.fromtimestamp(attack_start.timestamp() + shift, tz=UTC)
+    shifted_end = datetime.fromtimestamp(attack_end.timestamp() + shift, tz=UTC)
+    details = dict(attack.details)
+    details.update(
+        {
+            "mixed": True,
+            "background": "benign_baseline",
+            "attack_offset_seconds": shift,
+            "attack_label": attack.scenario,
+        }
+    )
+    return ScenarioLabels(
+        scenario=scenario,
+        attack_family=attack.attack_family,
+        label="suspicious",
+        bssids=tuple(dict.fromkeys((*benign.bssids, *attack.bssids))),
+        ssids=tuple(dict.fromkeys((*benign.ssids, *attack.ssids))),
+        clients=tuple(dict.fromkeys((*benign.clients, *attack.clients))),
+        start=benign.start,
+        end=max(benign.end, shifted_end) if benign.end else shifted_end,
+        packet_count=packet_count,
+        details={
+            **details,
+            "attack_start": shifted_start.isoformat(),
+            "attack_end": shifted_end.isoformat(),
+        },
+    )
 
 
 def generate_dataset(out_dir: str | Path, seed: int = SEED) -> list[GeneratedScenario]:
-    """Write all synthetic scenarios and labels under out_dir."""
+    """Write isolated and mixed scenarios plus labels under out_dir."""
     destination = Path(out_dir)
     destination.mkdir(parents=True, exist_ok=True)
     generated: list[GeneratedScenario] = []
+    scenario_packets: dict[str, list[object]] = {}
+    scenario_labels: dict[str, ScenarioLabels] = {}
     for name, builder in SCENARIOS.items():
         packets, labels = builder(seed)
+        scenario_packets[name] = packets
+        scenario_labels[name] = labels
         path = destination / f"{name}.pcap"
         wrpcap(str(path), packets)
         generated.append(GeneratedScenario(name=name, path=path, labels=labels))
+
+    benign_packets = scenario_packets["benign_baseline"]
+    benign_labels = scenario_labels["benign_baseline"]
+    for mixed_name, attack_name in MIXED_ATTACKS.items():
+        shifted_attack = [
+            _shift_packet(packet, MIXED_ATTACK_START_SECONDS)
+            for packet in scenario_packets[attack_name]
+        ]
+        packets = sorted(
+            [*benign_packets, *shifted_attack],
+            key=lambda packet: float(packet.time),
+        )
+        labels = _mixed_labels(
+            mixed_name,
+            benign_labels,
+            scenario_labels[attack_name],
+            MIXED_ATTACK_START_SECONDS,
+            len(packets),
+        )
+        path = destination / f"{mixed_name}.pcap"
+        wrpcap(str(path), packets)
+        generated.append(GeneratedScenario(name=mixed_name, path=path, labels=labels))
+
     manifest = {
         "seed": seed,
         "generated_at": "deterministic",
