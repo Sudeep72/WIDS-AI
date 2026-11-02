@@ -66,6 +66,60 @@ IDENTIFIER_COLUMNS: Final[tuple[str, ...]] = (
 )
 
 
+SCOPE_FEATURES: Final[dict[str, tuple[str, ...]]] = {
+    "bssid": (
+        "frame_count",
+        "beacon_count",
+        "beacon_interval_mean",
+        "beacon_interval_std",
+        "beacon_interval_jitter",
+        "seq_gap_count",
+        "seq_duplicate_count",
+        "probe_response_count",
+        "distinct_ssids_answered",
+        "deauth_count",
+        "disassoc_count",
+        "rssi_mean",
+        "rssi_std",
+        "channel_change_count",
+        "deauth_received_rate",
+        "broadcast_deauth_count",
+        "deauth_reason_skew",
+        "seq_backward_count",
+        "beacon_ratio",
+        "probe_response_ratio",
+        "deauth_ratio",
+    ),
+    "client": (
+        "frame_count",
+        "probe_request_count",
+        "distinct_ssids_probed",
+        "deauth_count",
+        "deauth_received_rate",
+        "rssi_mean",
+        "rssi_std",
+        "deauth_ratio",
+        "probe_request_ratio",
+    ),
+    "ssid": (
+        "frame_count",
+        "beacon_count",
+        "beacon_interval_mean",
+        "beacon_interval_std",
+        "beacon_interval_jitter",
+        "distinct_bssids",
+        "distinct_ouis",
+        "distinct_channels",
+        "rsn_mismatch",
+        "rssi_spread",
+        "probe_response_count",
+        "distinct_ssids_answered",
+        "beacon_ratio",
+        "probe_response_ratio",
+    ),
+}
+
+
 @dataclass(frozen=True)
 class TrainingMatrix:
     """Finite numeric matrix with stable column order and imputation values."""

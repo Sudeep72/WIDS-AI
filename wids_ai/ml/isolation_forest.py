@@ -20,6 +20,7 @@ from wids_ai.ml.baseline import NUMERIC_FEATURES, build_training_matrix
 
 MODEL_FILENAME = "isolation_forest.joblib"
 METADATA_FILENAME = "isolation_forest.metadata.json"
+SCOPE_DIRS = {"bssid": "bssid", "client": "client", "ssid": "ssid"}
 MODEL_KIND = "wids-ai-isolation-forest-robust-scaler"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_MODELS_DIR = PROJECT_ROOT / "models"
@@ -39,6 +40,7 @@ class ModelMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model_kind: str = MODEL_KIND
+    scope: str = "bssid"
     feature_names: tuple[str, ...]
     imputation_medians: dict[str, float]
     training_window_count: int
@@ -131,7 +133,15 @@ def train_isolation_forest(
     """Train a seeded IsolationForest pipeline on benign-only feature rows."""
     if not 0.0 < contamination <= 0.5:
         raise ValueError("contamination must be in (0, 0.5]")
-    matrix = build_training_matrix(rows)
+    materialized = list(rows) if not isinstance(rows, pd.DataFrame) else rows
+    if isinstance(materialized, pd.DataFrame):
+        scope = str(materialized["scope"].iloc[0]) if len(materialized) else "bssid"
+    else:
+        scope = materialized[0].scope if materialized else "bssid"
+    from wids_ai.ml.baseline import SCOPE_FEATURES
+
+    features = SCOPE_FEATURES.get(scope, NUMERIC_FEATURES)
+    matrix = build_training_matrix(materialized, feature_names=features)
     if matrix.row_count < 2:
         raise ValueError("At least two benign training windows are required")
     try:
@@ -159,12 +169,13 @@ def train_isolation_forest(
         ]
     )
     pipeline.fit(matrix.values)
-    destination = Path(out_dir)
+    destination = Path(out_dir) / SCOPE_DIRS.get(scope, scope)
     destination.mkdir(parents=True, exist_ok=True)
     model_path = destination / MODEL_FILENAME
     metadata_path = destination / METADATA_FILENAME
     joblib.dump(pipeline, model_path)
     metadata = ModelMetadata(
+        scope=scope,
         feature_names=matrix.feature_names,
         imputation_medians=dict(matrix.imputation_medians),
         training_window_count=matrix.row_count,
@@ -198,7 +209,10 @@ def load_model(
     metadata = ModelMetadata.model_validate_json(metadata_path.read_text(encoding="utf-8"))
     if metadata.model_kind != MODEL_KIND:
         raise ModelIntegrityError("Unsupported model kind")
-    if metadata.feature_names != NUMERIC_FEATURES:
+    from wids_ai.ml.baseline import SCOPE_FEATURES
+
+    expected_features = SCOPE_FEATURES.get(metadata.scope, NUMERIC_FEATURES)
+    if metadata.feature_names != expected_features:
         raise ModelIntegrityError("Model feature list does not match current schema")
     actual_hash = _sha256(model_path)
     if actual_hash != metadata.model_sha256:
@@ -234,20 +248,37 @@ def score_rows(model: TrainedModel, rows: Iterable[FeatureRow] | pd.DataFrame) -
     ]
 
 
-def aggregate_window_scores(rows: Iterable[ScoredRow]) -> list[WindowScore]:
-    """Aggregate scope rows into one maximum anomaly score per time window."""
+def aggregate_window_scores(
+    rows: Iterable[ScoredRow],
+    *,
+    method: str = "p95",
+    top_k: int = 3,
+) -> list[WindowScore]:
+    """Aggregate scope rows into one window score using a documented method."""
     grouped: dict[tuple[datetime, datetime], list[ScoredRow]] = {}
     for item in rows:
         grouped.setdefault((item.row.window_start, item.row.window_end), []).append(item)
-    return [
-        WindowScore(
-            window_start=start,
-            window_end=end,
-            anomaly_score=max(item.anomaly_score for item in items),
-            row_count=len(items),
+    aggregated: list[WindowScore] = []
+    for (start, end), items in sorted(grouped.items()):
+        values = sorted((item.anomaly_score for item in items), reverse=True)
+        if method == "max":
+            score = values[0]
+        elif method == "top_k_mean":
+            score = sum(values[:top_k]) / len(values[:top_k])
+        elif method == "p95":
+            index = max(0, math.ceil(0.95 * len(values)) - 1)
+            score = values[index]
+        else:
+            raise ValueError("method must be max, top_k_mean, or p95")
+        aggregated.append(
+            WindowScore(
+                window_start=start,
+                window_end=end,
+                anomaly_score=float(score),
+                row_count=len(items),
+            )
         )
-        for (start, end), items in sorted(grouped.items())
-    ]
+    return aggregated
 
 
 def write_scores(rows: Iterable[ScoredRow], path: str | Path) -> None:

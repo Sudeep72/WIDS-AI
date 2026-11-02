@@ -57,6 +57,17 @@ class MLConfig(BaseModel):
     random_seed: int = 42
 
 
+class CorrelationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rule_weight: float = Field(default=55.0, ge=0.0, le=100.0)
+    ml_weight: float = Field(default=15.0, ge=0.0, le=100.0)
+    trust_weight: float = Field(default=10.0, ge=0.0, le=100.0)
+    repeat_weight: float = Field(default=10.0, ge=0.0, le=100.0)
+    family_weight: float = Field(default=10.0, ge=0.0, le=100.0)
+    ml_only_cap: int = Field(default=25, ge=0, le=100)
+
+
 class SIEMConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -88,6 +99,7 @@ class Settings(BaseModel):
     capture: CaptureConfig = Field(default_factory=CaptureConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     ml: MLConfig = Field(default_factory=MLConfig)
+    correlation: CorrelationConfig = Field(default_factory=CorrelationConfig)
     siem: SIEMConfig = Field(default_factory=SIEMConfig)
     api: APIConfig = Field(default_factory=APIConfig)
 

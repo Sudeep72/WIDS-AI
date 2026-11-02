@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from collections.abc import Sequence
 from pathlib import Path
@@ -11,14 +12,21 @@ from wids_ai import __version__
 from wids_ai.capture.base import PcapSource
 from wids_ai.capture.live_source import LiveSource
 from wids_ai.config import PROJECT_ROOT, load_config
+from wids_ai.correlation.scorer import CorrelationConfig, correlate
 from wids_ai.features.extractors import FeatureRow, batch_extract
 from wids_ai.features.windowing import WindowConfig
 from wids_ai.inventory import APInventory
 from wids_ai.logging_config import configure_logging
 from wids_ai.ml.baseline import load_benign_rows
-from wids_ai.ml.isolation_forest import load_model, score_rows, train_isolation_forest, write_scores
+from wids_ai.ml.isolation_forest import (
+    aggregate_window_scores,
+    load_model,
+    score_rows,
+    train_isolation_forest,
+    write_scores,
+)
 from wids_ai.parser.dot11 import parse_frame
-from wids_ai.rules.engine import deduplicate, evaluate_rules, load_rules, write_detections
+from wids_ai.rules.engine import deduplicate, evaluate_rules, load_rules
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,7 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("pcap", type=Path)
             command.add_argument("--inventory", type=Path)
             command.add_argument("--rules", type=Path, default=Path("wids_ai/rules/rules"))
-            command.add_argument("--out", type=Path, default=Path("data/detections.json"))
+            command.add_argument("--out", type=Path, default=Path("data/alerts.json"))
+            command.add_argument("--model", type=Path, default=Path("models"))
+            command.add_argument("--trusted-model-root", type=Path, default=PROJECT_ROOT / "models")
             command.add_argument("--window-seconds", type=float, default=10.0)
             command.add_argument("--step-seconds", type=float, default=5.0)
         if name == "train":
@@ -106,15 +116,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         detections = evaluate_rules(rows, rules, frame_rows, inventory)
         incidents = deduplicate(detections)
-        write_detections(incidents, args.out)
-        print(f"Frames: {len(frame_rows)}  Feature rows: {len(rows)}  Incidents: {len(incidents)}")
-        print(f"{'SEVERITY':<10} {'RULE':<20} {'FIRST SEEN':<30} HITS")
-        for incident in incidents:
-            print(
-                f"{incident.severity:<10} {incident.rule_id:<20} "
-                f"{incident.first_seen.isoformat():<30} {incident.hit_count}"
+        ml_scores = []
+        for scope in ("bssid", "client", "ssid"):
+            model_dir = args.model / scope
+            if not (model_dir / "isolation_forest.joblib").is_file():
+                continue
+            model = load_model(model_dir, trusted_base=args.trusted_model_root)
+            scope_rows = feature_frame[feature_frame["scope"] == scope]
+            scope_scored = score_rows(model, scope_rows)
+            ml_scores.extend(
+                item.anomaly_score for item in aggregate_window_scores(scope_scored, method="max")
             )
-        print(f"Detections -> {args.out}")
+        correlation_config = CorrelationConfig(**settings.correlation.model_dump())
+        alerts = correlate(incidents, ml_scores, inventory, correlation_config)
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(
+            json.dumps([item.model_dump(mode="json") for item in alerts], indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"Frames: {len(frame_rows)}  Feature rows: {len(rows)}  Alerts: {len(alerts)}")
+        print(f"{'RISK':<5} {'FAMILY':<32} {'ATT&CK':<8} {'SEVERITY':<14} BSSIDS")
+        for alert in alerts:
+            technique = alert.mitre_attack.technique if alert.mitre_attack else "-"
+            print(
+                f"{alert.risk_score:<5} {alert.family:<32} {technique:<8} "
+                f"{alert.severity:<14} {','.join(alert.bssids)}"
+            )
+        print(f"Alerts -> {args.out}")
         return 0
     if args.command == "features":
         frame_rows = list(parse_frames(PcapSource(args.pcap)))
@@ -126,28 +154,40 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "train":
         rows = load_benign_rows(args.pcap)
-        trained = train_isolation_forest(
-            rows,
-            args.out,
-            seed=args.seed,
-            contamination=args.contamination,
-        )
-        print(
-            f"Trained on {trained.metadata.training_window_count} benign windows -> "
-            f"{trained.model_path}"
-        )
-        print(f"Model SHA-256: {trained.metadata.model_sha256}")
+        trained_models = []
+        for scope in ("bssid", "client", "ssid"):
+            scope_rows = [row for row in rows if row.scope == scope]
+            trained_models.append(
+                train_isolation_forest(
+                    scope_rows,
+                    args.out,
+                    seed=args.seed,
+                    contamination=args.contamination,
+                )
+            )
+        print(f"Trained {len(trained_models)} scope models -> {args.out}")
+        for trained in trained_models:
+            print(
+                f"{trained.metadata.scope}: {trained.metadata.training_window_count} "
+                f"windows -> {trained.model_path}"
+            )
         return 0
     if args.command == "score":
         frame_rows = list(parse_frames(PcapSource(args.pcap)))
         config = WindowConfig(args.window_seconds, args.step_seconds)
         feature_frame = batch_extract(frame_rows, config)
-        model = load_model(args.model, trusted_base=args.trusted_model_root)
-        scored = score_rows(model, feature_frame)
+        scored = []
+        for scope in ("bssid", "client", "ssid"):
+            model_dir = args.model / scope
+            if not (model_dir / "isolation_forest.joblib").is_file():
+                continue
+            model = load_model(model_dir, trusted_base=args.trusted_model_root)
+            scope_rows = feature_frame[feature_frame["scope"] == scope]
+            scored.extend(score_rows(model, scope_rows))
         write_scores(scored, args.out)
         values = [item.anomaly_score for item in scored]
         print(
-            f"Scored {len(values)} windows: mean={sum(values) / len(values):.4f} "
+            f"Scored {len(values)} rows: mean={sum(values) / len(values):.4f} "
             f"max={max(values):.4f} -> {args.out}"
         )
         return 0

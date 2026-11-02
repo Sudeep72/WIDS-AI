@@ -22,6 +22,14 @@ ml:
   contamination: 0.05
   random_seed: 42
 
+correlation:
+  rule_weight: 55
+  ml_weight: 15
+  trust_weight: 10
+  repeat_weight: 10
+  family_weight: 10
+  ml_only_cap: 25
+
 siem:
   enabled: false
   file_path: data/siem/events.jsonl

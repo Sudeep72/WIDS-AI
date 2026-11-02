@@ -22,27 +22,26 @@ supported platforms. Live capture is isolated behind a Linux-only source.
 
 ## Anomaly model design
 
-M6 uses one shared IsolationForest over a fixed BSSID-scope feature set. This design
-was selected over per-scope models for three reasons:
-
-1. The benign training sample is small. Splitting it into three models would reduce
-   each model's training evidence further.
-2. A shared scaler and feature order makes scores comparable across windows.
-3. Rules retain client and SSID semantics. The ML model supplies one supporting
-   anomaly signal for BSSID behavior, not the sole verdict.
+FIX B uses one model per scope: BSSID, client, and SSID. Each model receives only
+features that have meaning for that scope. This replaces the single shared model
+because the shared model diluted client and SSID evidence and the ML evaluation
+showed weak attack separation.
 
 Training uses only feature rows extracted from a benign PCAP. It does not read
-`labels.json` and does not read attack PCAPs. The persisted model contains a
-RobustScaler plus a seeded IsolationForest. The operational score is the maximum
-row score within each timestamp window, mapped from the IsolationForest decision
-function with `1 / (1 + exp(raw_score * 8))`. Lower raw decision values mean more
+`labels.json` and does not read attack PCAPs. Each persisted model contains a
+RobustScaler, a seeded IsolationForest, and scope-specific metadata. The model
+directory contains a joblib pipeline and metadata JSON with feature names, median
+imputation values, training count, sklearn version, seed, contamination, training
+time, scope, and the SHA-256 digest of the model file.
+
+Operational scores use the maximum of the per-scope scores for a timestamp window.
+The evaluation tool also reports top-2 mean. The raw IsolationForest decision score
+is mapped with `1 / (1 + exp(raw_score * 8))`. Lower raw decision values mean more
 anomalous behavior and map toward 1.0.
 
-The model directory contains a joblib pipeline and metadata JSON with feature names,
-median imputation values, training count, sklearn version, seed, contamination,
-training time, and the SHA-256 digest of the model file. Loading verifies the digest
-and defaults to the project `models/` trust root. A mismatched digest or a model
-outside the trust root is refused.
+Loading verifies the digest and requires each scope directory to match its metadata.
+The default trust root is the project `models/` directory. A mismatched digest or a
+model outside the trust root is refused.
 
 ## Windows testing environment
 
@@ -50,3 +49,15 @@ Windows Application Control can block the unsigned native extension in the insta
 scikit-learn wheel. The ML tests skip only when that import is unavailable. This is
 an environment policy issue, not a model result. If scikit-learn is blocked, run the
 training and scoring tests in an approved Python environment where scikit-learn loads.
+## Correlation and alerts
+
+The correlation scorer is rule-first. Default weights are configured as rule 55,
+ML 15, AP trust 10, repeat hits 10, and multiple families 10. The final risk is
+clamped to 0 through 100. ML-only observations are capped at 25 and are labeled
+informational. Rule-backed alert severity is derived from the final risk score.
+
+Related incidents are grouped by family, overlapping BSSID entities, and a
+30-second time gap. ATT&CK mappings are looked up from `attack/mapping.yml`; no
+mapping is duplicated in alert code. Explanations are deterministic templates built
+only from rule evidence fields and the ML score. The alert never claims that ML or
+a best-fit ATT&CK mapping establishes certainty.
