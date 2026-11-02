@@ -43,3 +43,35 @@ def test_cli_analyze_reads_pcap(tmp_path: Path) -> None:
 def test_live_is_refused_off_linux() -> None:
     with pytest.raises(RuntimeError, match="requires Linux"):
         main(["live", "--iface", "wlan0mon"])
+
+
+def test_cli_features_writes_csv(tmp_path: Path) -> None:
+    pcap = tmp_path / "sample.pcap"
+    packets = []
+    for index in range(3):
+        packet = (
+            RadioTap(
+                present="Channel+dBm_AntSignal",
+                ChannelFrequency=2437,
+                dBm_AntSignal=-45,
+            )
+            / Dot11(
+                type=0,
+                subtype=8,
+                addr1="ff:ff:ff:ff:ff:ff",
+                addr2="00:11:22:33:44:55",
+                addr3="00:11:22:33:44:55",
+                SC=index << 4,
+            )
+            / Dot11Beacon(cap=0x0401, beacon_interval=1000)
+            / Dot11Elt(ID="SSID", info=b"lab")
+        )
+        packet.time = 1_735_689_600 + index
+        packets.append(packet)
+    wrpcap(str(pcap), packets)
+    output = tmp_path / "features.csv"
+    assert main(["features", str(pcap), "--out", str(output)]) == 0
+    text = output.read_text(encoding="utf-8")
+    assert "window_start" in text
+    assert "distinct_ssids_probed" in text
+    assert len(text.splitlines()) > 1

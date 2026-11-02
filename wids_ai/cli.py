@@ -11,6 +11,8 @@ from wids_ai import __version__
 from wids_ai.capture.base import PcapSource
 from wids_ai.capture.live_source import LiveSource
 from wids_ai.config import load_config
+from wids_ai.features.extractors import batch_extract
+from wids_ai.features.windowing import WindowConfig
 from wids_ai.logging_config import configure_logging
 from wids_ai.parser.dot11 import parse_frame
 
@@ -25,6 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     for name, help_text in (
         ("analyze", "Analyze offline PCAP files"),
+        ("features", "Extract window features from an offline PCAP"),
         ("train", "Train the baseline anomaly model"),
         ("serve", "Serve the API and dashboard"),
         ("live", "Capture on a Linux monitor-mode interface"),
@@ -33,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--config", dest="command_config", type=Path, default=None)
         if name in {"analyze", "train"}:
             command.add_argument("paths", nargs="+", type=Path)
+        if name == "features":
+            command.add_argument("pcap", type=Path)
+            command.add_argument("--out", type=Path, required=True)
+            command.add_argument("--window-seconds", type=float, default=10.0)
+            command.add_argument("--step-seconds", type=float, default=5.0)
         if name == "live":
             command.add_argument("--iface", default="wlan0mon")
             command.add_argument("--channel", type=int, default=6)
@@ -55,6 +63,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         frames = analyze_paths(args.paths)
         LOGGER.info("Parsed %d frames", frames)
         return 0
+    if args.command == "features":
+        frame_rows = list(parse_frames(PcapSource(args.pcap)))
+        config = WindowConfig(args.window_seconds, args.step_seconds)
+        features = batch_extract(frame_rows, config)
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        features.to_csv(args.out, index=False)
+        LOGGER.info("Wrote %d feature rows to %s", len(features), args.out)
+        return 0
     if args.command == "live":
         source = LiveSource(args.iface, args.channel)
         frames = parse_source(source)
@@ -64,12 +80,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def parse_source(source: PcapSource | LiveSource) -> int:
-    count = 0
+def parse_frames(source: PcapSource | LiveSource):
     for packet in source.packets():
-        if parse_frame(packet) is not None:
-            count += 1
-    return count
+        frame = parse_frame(packet)
+        if frame is not None:
+            yield frame
+
+
+def parse_source(source: PcapSource | LiveSource) -> int:
+    return sum(1 for _ in parse_frames(source))
 
 
 def analyze_paths(paths: Sequence[Path]) -> int:
