@@ -18,10 +18,19 @@ class Source(ABC):
 
 
 class PcapSource(Source):
-    """Offline PCAP source. The implementation lands in milestone M2."""
+    """Offline PCAP source that works on Windows without a wireless adapter."""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
 
     def packets(self) -> Iterator[Packet]:
-        raise NotImplementedError("Offline PCAP reading is implemented in milestone M2")
+        if not self.path.is_file():
+            raise FileNotFoundError(f"PCAP file not found: {self.path}")
+        from scapy.error import Scapy_Exception
+        from scapy.utils import rdpcap
+
+        try:
+            packets = rdpcap(str(self.path))
+        except (OSError, ValueError, Scapy_Exception) as exc:
+            raise ValueError(f"Unable to read PCAP file {self.path}: {exc}") from exc
+        yield from packets

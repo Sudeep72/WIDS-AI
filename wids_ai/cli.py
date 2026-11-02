@@ -8,9 +8,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from wids_ai import __version__
-from wids_ai.capture.live_source import require_linux_live_capture
+from wids_ai.capture.base import PcapSource
+from wids_ai.capture.live_source import LiveSource
 from wids_ai.config import load_config
 from wids_ai.logging_config import configure_logging
+from wids_ai.parser.dot11 import parse_frame
 
 LOGGER = logging.getLogger(__name__)
 
@@ -49,10 +51,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     settings = load_config(config_path)
     configure_logging(settings)
 
+    if args.command == "analyze":
+        frames = analyze_paths(args.paths)
+        LOGGER.info("Parsed %d frames", frames)
+        return 0
     if args.command == "live":
-        require_linux_live_capture()
+        source = LiveSource(args.iface, args.channel)
+        frames = parse_source(source)
+        LOGGER.info("Parsed %d live frames", frames)
+        return 0
     LOGGER.info("Command %s is scaffolded; implementation lands in later milestones", args.command)
     return 0
+
+
+def parse_source(source: PcapSource | LiveSource) -> int:
+    count = 0
+    for packet in source.packets():
+        if parse_frame(packet) is not None:
+            count += 1
+    return count
+
+
+def analyze_paths(paths: Sequence[Path]) -> int:
+    total = 0
+    for path in paths:
+        LOGGER.info("Analyzing %s", path)
+        count = parse_source(PcapSource(path))
+        LOGGER.info("Parsed %d frames from %s", count, path)
+        total += count
+    return total
 
 
 if __name__ == "__main__":
