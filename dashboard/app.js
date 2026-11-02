@@ -9,6 +9,14 @@ function normalizeText(value, max = 256) {
   return String(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, "").slice(0, max);
 }
 
+function sentenceTruncate(value, max = 280) {
+  const textValue = normalizeText(value, 4000);
+  if (textValue.length <= max) return textValue;
+  const boundary = textValue.lastIndexOf(".", max);
+  if (boundary > 0) return textValue.slice(0, boundary + 1) + " ...";
+  return textValue.slice(0, max).replace(/\s+\S*$/, "") + "...";
+}
+
 function setText(element, value) {
   element.textContent = normalizeText(value);
 }
@@ -35,7 +43,15 @@ function renderCounts(container, counts) {
 function renderSparkline(scores) {
   const svg = byId("ml-sparkline");
   svg.replaceChildren();
-  if (!scores || scores.length === 0) {\n    const empty = document.createElementNS("http://www.w3.org/2000/svg", "text");\n    empty.setAttribute("x", "12");\n    empty.setAttribute("y", "44");\n    empty.setAttribute("class", "sparkline-empty");\n    empty.textContent = "No ML score data";\n    svg.append(empty);\n    return;\n  }
+  if (!scores || scores.length === 0) {
+    const empty = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    empty.setAttribute("x", "12");
+    empty.setAttribute("y", "44");
+    empty.setAttribute("class", "sparkline-empty");
+    empty.textContent = "No ML score data";
+    svg.append(empty);
+    return;
+  }
   const width = 320;
   const height = 80;
   const step = scores.length > 1 ? width / (scores.length - 1) : width;
@@ -55,7 +71,8 @@ function renderAPs(aps) {
   body.replaceChildren();
   (aps || []).forEach((ap) => {
     const row = document.createElement("tr");
-    const rssi = ap.rssi === null || ap.rssi === undefined ? "-" : `${Number(ap.rssi).toFixed(1)} dBm`;\n    const values = [ap.ssid || "-", ap.bssid, ap.oui || "-", (ap.channels || []).join(","), rssi, ap.security || "unknown"];
+    const rssi = ap.rssi === null || ap.rssi === undefined ? "-" : `${Number(ap.rssi).toFixed(1)} dBm`;
+    const values = [ap.ssid || "-", ap.bssid, ap.oui || "-", (ap.channels || []).join(","), rssi, ap.security || "unknown"];
     values.forEach((value) => {
       const cell = document.createElement("td");
       setText(cell, value);
@@ -73,9 +90,10 @@ function renderAPs(aps) {
     setText(trustNumber, ap.trust_score);
     trustCell.append(trustNumber);
     row.append(trustCell);
-    const flaggedCell = document.createElement("td");
-    setText(flaggedCell, ap.flagged ? `Yes: ${ap.flag_reason || "flagged"}` : "No");
-    row.append(flaggedCell);
+    const statusCell = document.createElement("td");
+    const status = ap.status || (ap.flagged ? "Flagged" : "Trusted");
+    setText(statusCell, `${status}${ap.flag_reason ? `: ${ap.flag_reason}` : ""}`);
+    row.append(statusCell);
     body.append(row);
   });
 }
@@ -123,7 +141,7 @@ function renderAlerts(alerts) {
     detail.className = "alert-detail";
     detail.hidden = true;
     const why = document.createElement("p");
-    setText(why, alert.why);
+    setText(why, sentenceTruncate(alert.why));
     detail.append(why);
     detail.append(detailList("Evidence", alert.evidence || alert.rule_evidence));
     detail.append(detailList("Indicators found", alert.indicators_found));
@@ -145,28 +163,36 @@ async function fetchJSON(url) {
 
 async function refresh() {
   if (state.paused) return;
+  const failures = [];
+  const load = async (name, url, render) => {
+    try {
+      const payload = await fetchJSON(url);
+      render(payload);
+    } catch (err) {
+      failures.push(`${name}: ${err.message}`);
+    }
+  };
+  const severity = byId("severity-filter").value;
+  const suffix = severity ? `?severity=${encodeURIComponent(severity)}` : "";
+  await Promise.all([
+    load("stats", "/api/stats", (stats) => {
+      setText(byId("stat-frames"), stats.frames_processed);
+      setText(byId("stat-windows"), stats.windows);
+      renderCounts(byId("severity-counts"), stats.alerts_by_severity);
+      renderCounts(byId("family-counts"), stats.alerts_by_family);
+      renderSparkline(stats.latest_ml_scores);
+    }),
+    load("APs", "/api/aps", renderAPs),
+    load("alerts", `/api/alerts${suffix}`, renderAlerts),
+  ]);
   const error = byId("error-state");
-  try {
-    const severity = byId("severity-filter").value;
-    const suffix = severity ? `?severity=${encodeURIComponent(severity)}` : "";
-    const [stats, aps, alerts] = await Promise.all([
-      fetchJSON("/api/stats"),
-      fetchJSON("/api/aps"),
-      fetchJSON(`/api/alerts${suffix}`),
-    ]);
-    setText(byId("stat-frames"), stats.frames_processed);
-    setText(byId("stat-windows"), stats.windows);
-    renderCounts(byId("severity-counts"), stats.alerts_by_severity);
-    renderCounts(byId("family-counts"), stats.alerts_by_family);
-    renderSparkline(stats.latest_ml_scores);
-    renderAPs(aps);
-    renderAlerts(alerts);
+  if (failures.length) {
+    error.hidden = false;
+    setText(error, `Unable to load ${failures.join("; ")}`);
+    setText(byId("poll-status"), "Error");
+  } else {
     error.hidden = true;
     setText(byId("poll-status"), "Polling");
-  } catch (err) {
-    error.hidden = false;
-    setText(error, `Unable to load data: ${err.message}`);
-    setText(byId("poll-status"), "Error");
   }
 }
 

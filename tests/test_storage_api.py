@@ -146,6 +146,59 @@ def test_dashboard_assets_have_no_external_urls_or_dangerous_sinks() -> None:
     assert "section + section" in css
     assert "No ML score data" in js
     assert "dBm" in js
+    assert "sentenceTruncate" in js
+
+
+def test_source_tree_has_no_escape_corruption_or_bom() -> None:
+    roots = [
+        Path("dashboard"),
+        Path("wids_ai"),
+        Path("tests"),
+        Path("tools"),
+        Path("scripts"),
+        Path("docs"),
+    ]
+    extensions = {".py", ".js", ".css", ".html", ".md", ".yml", ".yaml", ".ps1", ".sh"}
+    literal = chr(92) + "n"
+    for root in roots:
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in extensions:
+                continue
+            raw = path.read_bytes()
+            assert not raw.startswith(b"\xef\xbb\xbf"), f"BOM in {path}"
+            text = raw.decode("utf-8")
+            assert "\r" not in text, f"non-LF line ending in {path}"
+            if path.parts[0] == "dashboard":
+                assert all(ord(char) < 128 for char in text), f"non-ASCII in {path}"
+            for number, line in enumerate(text.splitlines(), 1):
+                assert not (len(line) > 400 and literal in line), (
+                    f"possible escaped newline in {path}:{number}"
+                )
+
+
+@pytest.mark.skipif(
+    __import__("shutil").which("node") is None,
+    reason="node is not on PATH; JavaScript syntax check skipped",
+)
+def test_dashboard_javascript_parses_with_node() -> None:
+    import subprocess
+
+    dashboard = Path(__file__).resolve().parent.parent / "dashboard"
+    for script in sorted(dashboard.glob("*.js")):
+        subprocess.run(["node", "--check", str(script)], check=True)
+
+
+def test_legacy_inventory_security_list_loads(tmp_path: Path) -> None:
+    legacy = tmp_path / "legacy-inventory.json"
+    legacy.write_text(
+        '{"aps":{"00:11:22:33:44:55":{"bssid":"00:11:22:33:44:55",'
+        '"ssid":"LabNet","oui":"00:11:22","channels":[6],'
+        '"security":["open","wep"],"beacon_interval":1000,'
+        '"mean_rssi":-42.0,"trust_score":90,"observations":10}}}',
+        encoding="utf-8",
+    )
+    inventory = APInventory.load(legacy)
+    assert inventory.aps["00:11:22:33:44:55"].security == "wep"
 
 
 @pytest.mark.slow
@@ -224,12 +277,19 @@ def test_replay_ap_state_frames_and_sparkline(tmp_path: Path, synthetic_dataset)
     assert aps["02:de:ad:be:ef:01"]["flag_reason"] == "not in trusted inventory"
     assert aps["02:de:ad:be:ef:01"]["trust_score"] < 50
     assert aps["00:11:22:33:44:55"]["trust_score"] >= 80
-    assert aps["00:11:22:33:44:55"]["flagged"] is True
-    assert aps["00:11:22:33:44:55"]["flag_reason"] == "duplicate SSID"
+    assert aps["00:11:22:33:44:55"]["flagged"] is False
+    assert aps["00:11:22:33:44:55"]["status"] == "Watch"
+    assert aps["00:11:22:33:44:55"]["flag_reason"] == "SSID shared with untrusted AP"
+    assert aps["02:de:ad:be:ef:01"]["status"] == "Flagged"
     stats = client.get("/api/stats").json()
     assert stats["frames_processed"] == result.frames
     assert stats["latest_ml_scores"]
     assert all(0.0 <= item["score"] <= 1.0 for item in stats["latest_ml_scores"])
+    alert = client.get("/api/alerts?limit=1").json()[0]
+    assert len(alert["evidence"]) == len({item["field"] for item in alert["evidence"]})
+    assert any(item.get("rule_ids") for item in alert["evidence"])
+    assert "it is not a standalone verdict." in alert["why"]
+    assert alert["why"].endswith("not a standalone verdict.")
     for ap in aps.values():
         assert ap["rssi"] is None or round(ap["rssi"], 1) == ap["rssi"]
         assert isinstance(ap["security"], str)
