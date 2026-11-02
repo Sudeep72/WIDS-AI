@@ -1,0 +1,33 @@
+app:
+  name: WIDS-AI
+  environment: development
+  timezone: UTC
+
+logging:
+  level: INFO
+  format: "%(asctime)s %(levelname)s %(name)s %(message)s"
+
+capture:
+  pcap_directory: data/pcaps
+  live:
+    enabled: false
+    interface: wlan0mon
+    channel: 6
+
+storage:
+  database_path: data/wids.db
+
+ml:
+  model_path: artifacts/isolation_forest.joblib
+  contamination: 0.05
+  random_seed: 42
+
+siem:
+  enabled: false
+  file_path: data/siem/events.jsonl
+  http_endpoint: null
+  timeout_seconds: 5
+
+api:
+  host: 127.0.0.1
+  port: 8000

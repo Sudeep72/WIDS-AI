@@ -1,0 +1,4 @@
+# Best-fit ATT&CK mappings are added with detection rules in milestone M7.
+# Verify every mapping at attack.mitre.org before operational use.
+families: {}
+rules: {}
