@@ -15,6 +15,7 @@ def run(*args: str) -> None:
 
 
 def main() -> int:
+    (ROOT / ".tmp").mkdir(exist_ok=True)
     run(sys.executable, "-m", "ruff", "check", ".")
     run(sys.executable, "-m", "ruff", "format", "--check", ".")
     run(sys.executable, "-m", "pytest")

@@ -34,7 +34,8 @@ wids-ai = "wids_ai.cli:main"
 include = ["wids_ai*"]
 
 [tool.pytest.ini_options]
-addopts = "-ra"
+addopts = "--basetemp=.tmp/pytest"
+cache_dir = ".tmp/pytest_cache"
 testpaths = ["tests"]
 pythonpath = ["."]
 
