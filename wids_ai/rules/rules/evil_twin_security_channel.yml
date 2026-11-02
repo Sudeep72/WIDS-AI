@@ -12,9 +12,6 @@ conditions:
     - field: rsn_security_mismatch
       operator: eq
       value: 1
-    - field: rsn_mismatch
-      operator: eq
-      value: 1
 threshold: 1
 threshold_field: distinct_bssids
 window: 10

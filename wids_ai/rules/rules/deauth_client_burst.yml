@@ -15,5 +15,5 @@ window: 10
 cooldown: 20
 attack_ref: deauth
 false_positive_notes: >-
-  Repeated association failures or a client repeatedly rejoining can create a
-  local burst.
+  Benign baseline has zero client deauth frames. Repeated association failures
+  can produce a local burst.

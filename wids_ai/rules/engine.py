@@ -280,7 +280,8 @@ def evaluate_rule(
         return None
     threshold_field = rule.threshold_field or rule.conditions.field or "frame_count"
     threshold_value = values.get(threshold_field, 0.0)
-    if threshold_value is None or float(threshold_value) < rule.threshold:
+    composite = rule.conditions.any is not None and len(rule.conditions.any) > 1
+    if not composite and (threshold_value is None or float(threshold_value) < rule.threshold):
         return None
     evidence = _evidence_for(rule.conditions, values, rule.threshold)
     bssids, ssids, clients = _identity_from_row(row)

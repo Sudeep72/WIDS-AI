@@ -18,5 +18,5 @@ window: 10
 cooldown: 30
 attack_ref: beacon_anomaly
 false_positive_notes: >-
-  Channel changes, monitor-mode packet loss, and overlapping BSSIDs can create
-  apparent interval variance.
+  Threshold is more than six times the benign 99th percentile. Channel changes
+  and packet loss can still elevate interval variance.

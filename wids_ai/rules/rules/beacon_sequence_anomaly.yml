@@ -11,12 +11,12 @@ conditions:
       value: 2
     - field: seq_gap_count
       operator: ge
-      value: 3
+      value: 2
 threshold: 2
 threshold_field: seq_duplicate_count
 window: 10
 cooldown: 30
 attack_ref: beacon_anomaly
 false_positive_notes: >-
-  Packet loss and retransmissions can create gaps, while some firmware reuses
-  sequence numbers during reset.
+  Threshold is above the benign 99th percentile for duplicate sequence numbers
+  and sequence gaps. Packet loss and firmware resets can still create gaps.

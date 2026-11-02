@@ -56,3 +56,5 @@ rules:
   WIDS-BEACON-002: beacon_management_anomaly
   # Best-fit mapping. Verify at attack.mitre.org.
   WIDS-BEACON-003: beacon_management_anomaly
+  # Best-fit mapping. Verify at attack.mitre.org.
+  WIDS-BEACON-004: beacon_management_anomaly

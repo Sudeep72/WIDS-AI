@@ -118,12 +118,12 @@ def build_training_matrix(
     )
 
 
-ML_SCOPES: Final[tuple[str, ...]] = ("bssid",)
+ML_SCOPES: Final[tuple[str, ...]] = ("bssid", "client", "ssid")
 
 
-def filter_ml_rows(rows: list[FeatureRow]) -> list[FeatureRow]:
-    """Keep scopes with stable structural context for the shared model."""
-    return [row for row in rows if row.scope in ML_SCOPES]
+def filter_ml_rows(rows: list[FeatureRow], scopes: tuple[str, ...] = ML_SCOPES) -> list[FeatureRow]:
+    """Keep rows for the requested scopes."""
+    return [row for row in rows if row.scope in scopes]
 
 
 def load_benign_rows(

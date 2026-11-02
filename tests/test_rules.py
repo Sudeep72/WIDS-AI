@@ -61,9 +61,6 @@ def _rules() -> list:
     return load_rules(RULES)
 
 
-DETECTION_CACHE: dict[tuple[str, int], list] = {}
-
-
 def _loaded_frames(pcap: Path) -> list[Frame]:
     return [
         frame for packet in PcapSource(pcap).packets() if (frame := parse_frame(packet)) is not None
@@ -92,13 +89,8 @@ def _detections(
     inventory: APInventory,
     parsed: dict[str, tuple[list[Frame], list[FeatureRow]]],
 ) -> list:
-    key = (str(pcap), id(inventory))
-    if key in DETECTION_CACHE:
-        return DETECTION_CACHE[key]
     frames, rows = parsed[pcap.stem]
-    result = evaluate_rules(rows, _rules(), frames, inventory)
-    DETECTION_CACHE[key] = result
-    return result
+    return evaluate_rules(rows, _rules(), frames, inventory)
 
 
 @pytest.fixture(scope="session")
@@ -369,3 +361,35 @@ def test_each_rule_does_not_fire_on_benign(
 ) -> None:
     detections = _detections(synthetic / "benign_baseline.pcap", inventory, parsed)
     assert rule_id not in {detection.rule_id for detection in detections}
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3, 42, 99])
+def test_seed_robustness(seed: int, tmp_path: Path) -> None:
+    dataset = tmp_path / f"synthetic-{seed}"
+    generate_dataset(dataset, seed=seed)
+    labels_payload = json.loads((dataset / "labels.json").read_text(encoding="utf-8"))
+    labels = {item["scenario"]: item for item in labels_payload["scenarios"]}
+    benign_frames = _loaded_frames(dataset / "benign_baseline.pcap")
+    seed_inventory = APInventory.from_frames(benign_frames)
+    benign_features = batch_extract(benign_frames, WindowConfig(10, 5))
+    benign_rows = [
+        FeatureRow.model_validate(item.to_dict()) for _, item in benign_features.iterrows()
+    ]
+    assert deduplicate(evaluate_rules(benign_rows, _rules(), benign_frames, seed_inventory)) == []
+    for name in (
+        "mixed_evil_twin",
+        "mixed_deauth_burst",
+        "mixed_karma_probe_responses",
+        "mixed_beacon_sequence_anomaly",
+    ):
+        frames = _loaded_frames(dataset / f"{name}.pcap")
+        feature_frame = batch_extract(frames, WindowConfig(10, 5))
+        rows = [FeatureRow.model_validate(item.to_dict()) for _, item in feature_frame.iterrows()]
+        incidents = deduplicate(evaluate_rules(rows, _rules(), frames, seed_inventory))
+        start = datetime.fromisoformat(labels[name]["details"]["attack_start"])
+        end = datetime.fromisoformat(labels[name]["details"]["attack_end"])
+        tolerance = timedelta(seconds=10)
+        assert incidents, f"{name} produced no incidents for seed {seed}"
+        assert any(
+            start - tolerance <= incident.first_seen <= end + tolerance for incident in incidents
+        ), f"{name} produced no in-window incident for seed {seed}"

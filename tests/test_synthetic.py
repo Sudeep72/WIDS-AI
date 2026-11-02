@@ -184,3 +184,41 @@ def test_mixed_attack_is_overlaid_mid_capture(
     first_twin = min(frame.timestamp for frame in mixed_frames if frame.bssid == attack_bssid)
     assert first_twin > min(frame.timestamp for frame in mixed_frames)
     assert first_twin.year == 2025
+
+
+MIXED_NAMES = (
+    "mixed_evil_twin",
+    "mixed_deauth_burst",
+    "mixed_karma_probe_responses",
+    "mixed_beacon_sequence_anomaly",
+)
+
+
+def _benign_sequence_streams(
+    frames: list[Frame],
+) -> dict[str, tuple[tuple[float, int | None], ...]]:
+    streams: dict[str, list[tuple[float, int | None]]] = {}
+    for frame in frames:
+        if frame.bssid in {"00:11:22:33:44:55", "00:11:22:33:44:66", "00:11:22:33:44:77"}:
+            streams.setdefault(frame.bssid, []).append((frame.timestamp.timestamp(), frame.seq_num))
+    return {bssid: tuple(values) for bssid, values in streams.items()}
+
+
+def test_mixed_sequence_streams_match_benign(
+    parsed_frames: dict[str, tuple[Frame, ...]],
+) -> None:
+    benign_streams = _benign_sequence_streams(list(parsed_frames["benign_baseline"]))
+    for name in MIXED_NAMES:
+        mixed_streams = _benign_sequence_streams(list(parsed_frames[name]))
+        assert mixed_streams == benign_streams
+
+
+def test_mixed_attack_sources_are_distinct_from_benign(
+    generated: tuple[Path, dict[str, dict[str, object]]],
+) -> None:
+    _, labels = generated
+    benign_bssids = set(labels["benign_baseline"]["bssids"])
+    for name in MIXED_NAMES:
+        attack_bssids = set(labels[name]["bssids"]) - benign_bssids
+        assert attack_bssids
+        assert all(not bssid.startswith("00:11:22:33") for bssid in attack_bssids)

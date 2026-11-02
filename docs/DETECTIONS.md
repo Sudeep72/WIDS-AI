@@ -144,3 +144,23 @@ positive notes.
 
 The inventory is in-memory and JSON-backed. Trust scores start at 90 and are
 clamped to the 0 to 100 range when rules adjust them.
+## Threshold justification
+
+Thresholds were checked against benign BSSID, client, and SSID windows from the
+synthetic benign baseline. The benign 99th percentiles were: beacon interval
+standard deviation 7.713 ms, interval jitter 6.985 ms, sequence gaps 1, duplicate
+sequence numbers 0, deauth count 0, broadcast deauth count 0, answered SSIDs per
+BSSID 1, probe responses per BSSID 1, and BSSID count per SSID 1.
+
+- `WIDS-BEACON-001` uses 50 ms interval standard deviation, over six times the
+  benign 99th percentile.
+- `WIDS-BEACON-002` uses 2 duplicate sequence numbers or 2 gaps, above the benign
+  99th percentile for both fields.
+- `WIDS-BEACON-003` uses 20 ms interval jitter, nearly three times the benign
+  99th percentile.
+- Deauth rules use nonzero counts above the benign 99th percentile of zero.
+- KARMA rules use 3 or 5 distinct answered SSIDs, above the benign 99th
+  percentile of one.
+- `WIDS-EVIL-003` now checks inventory channel or security mismatch. Generic RSN
+  inconsistency was removed from this rule because it mislabeled a beacon
+  anomaly as an evil-twin event.

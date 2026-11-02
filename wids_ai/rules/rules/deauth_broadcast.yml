@@ -15,5 +15,5 @@ window: 10
 cooldown: 20
 attack_ref: deauth
 false_positive_notes: >-
-  Rare AP-initiated network resets or vendor maintenance actions can broadcast
-  deauthentication frames.
+  Benign baseline has zero broadcast deauth frames. Rare network-wide resets can
+  still produce them.

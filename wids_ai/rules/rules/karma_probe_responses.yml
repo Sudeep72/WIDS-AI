@@ -18,5 +18,5 @@ window: 10
 cooldown: 30
 attack_ref: karma
 false_positive_notes: >-
-  Multi-SSID access points and test labs can legitimately answer several SSIDs,
-  but they usually advertise a stable and related SSID set.
+  Benign 99th percentile is one answered SSID per BSSID window. Multi-SSID
+  access points can legitimately answer more.

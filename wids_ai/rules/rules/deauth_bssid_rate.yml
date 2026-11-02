@@ -18,5 +18,5 @@ window: 10
 cooldown: 20
 attack_ref: deauth
 false_positive_notes: >-
-  AP reboots, client transitions, and scheduled network maintenance can produce
-  short deauthentication bursts.
+  Benign baseline has zero deauth frames in every window. AP reboots and client
+  transitions can still produce short bursts.

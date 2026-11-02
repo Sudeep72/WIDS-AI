@@ -18,5 +18,5 @@ window: 10
 cooldown: 30
 attack_ref: karma
 false_positive_notes: >-
-  Captures near busy public hotspots can show several SSIDs from one physical
-  device.
+  Benign 99th percentile is one probe response per BSSID window. Busy public
+  hotspots can still produce several.

@@ -81,16 +81,15 @@ KNOWN_APS = (
     AccessPoint("00:11:22:33:44:66", "LabGuest", 1, "001122", -55, privacy=True),
     AccessPoint("00:11:22:33:44:77", "Office-IoT", 11, "001122", -61, privacy=True),
 )
-LAB_CLIENTS = (
-    "aa:bb:cc:00:00:01",
-    "aa:bb:cc:00:00:02",
-    "aa:bb:cc:00:00:03",
-)
+LAB_CLIENTS = ("aa:bb:cc:00:00:01", "aa:bb:cc:00:00:02", "aa:bb:cc:00:00:03")
 TWIN_BSSID = "02:de:ad:be:ef:01"
 TWIN_SSID = "LabNet"
-DEAUTH_BSSID = KNOWN_APS[0].bssid
-DEAUTH_CLIENT = LAB_CLIENTS[0]
+DEAUTH_BSSID = "02:de:ad:de:01:01"
+DEAUTH_CLIENT = "de:ad:cc:00:00:01"
 KARMA_BSSID = "02:00:00:00:10:01"
+KARMA_CLIENTS = ("de:ad:cc:00:00:11", "de:ad:cc:00:00:12")
+BEACON_ATTACK_BSSID = "02:be:ac:00:01:01"
+BEACON_ATTACK_SSID = "LabBeaconAnomaly"
 
 
 def _timestamp(seconds: float) -> datetime:
@@ -115,26 +114,16 @@ BEACON_TEMPLATES: dict[tuple[str, str, int, int, int, bool], object] = {}
 
 def _build_beacon(ap: AccessPoint, sequence: int, interval: int, rssi: int) -> object:
     key = (ap.bssid, ap.ssid, ap.channel, rssi, interval, ap.privacy)
-    packet = BEACON_TEMPLATES.get(key)
-    if packet is None:
-        packet = (
+    template = BEACON_TEMPLATES.get(key)
+    if template is None:
+        template = (
             _radio(ap.channel, rssi)
-            / Dot11(
-                type=0,
-                subtype=8,
-                addr1=BROADCAST,
-                addr2=ap.bssid,
-                addr3=ap.bssid,
-                SC=0,
-            )
-            / Dot11Beacon(
-                cap=0x0411 if ap.privacy else 0x0401,
-                beacon_interval=interval,
-            )
+            / Dot11(type=0, subtype=8, addr1=BROADCAST, addr2=ap.bssid, addr3=ap.bssid, SC=0)
+            / Dot11Beacon(cap=0x0411 if ap.privacy else 0x0401, beacon_interval=interval)
             / _ssid(ap.ssid)
         )
-        BEACON_TEMPLATES[key] = packet
-    packet = packet.copy()
+        BEACON_TEMPLATES[key] = template
+    packet = template.copy()
     packet[Dot11].SC = (sequence & 0xFFF) << 4
     return packet
 
@@ -182,7 +171,7 @@ def _benign(seed: int) -> tuple[list[object], ScenarioLabels]:
     rng = random.Random(seed + 1)
     packets: list[object] = []
     sequences = {ap.bssid: 0 for ap in KNOWN_APS}
-    next_beacon = {ap.bssid: 0.0 + rng.uniform(0, 0.5) for ap in KNOWN_APS}
+    next_beacon = {ap.bssid: rng.uniform(0, 0.5) for ap in KNOWN_APS}
     duration = BENIGN_DURATION_SECONDS
     ssids = [ap.ssid for ap in KNOWN_APS]
     while True:
@@ -202,7 +191,6 @@ def _benign(seed: int) -> tuple[list[object], ScenarioLabels]:
         )
         sequences[ap.bssid] += 1
         next_beacon[ap.bssid] += interval / 1000.0
-
     probe_sequence = 0
     for second in range(10, duration, 27):
         client = rng.choice(LAB_CLIENTS)
@@ -218,10 +206,7 @@ def _benign(seed: int) -> tuple[list[object], ScenarioLabels]:
                 )
             )
             probe_sequence += 1
-
     packets.sort(key=lambda packet: float(packet.time))
-    start = _timestamp(0)
-    end = _timestamp(duration)
     labels = ScenarioLabels(
         scenario="benign_baseline",
         attack_family="benign",
@@ -229,8 +214,8 @@ def _benign(seed: int) -> tuple[list[object], ScenarioLabels]:
         bssids=tuple(ap.bssid for ap in KNOWN_APS),
         ssids=tuple(ap.ssid for ap in KNOWN_APS),
         clients=LAB_CLIENTS,
-        start=start,
-        end=end,
+        start=_timestamp(0),
+        end=_timestamp(duration),
         packet_count=len(packets),
         details={
             "duration_seconds": duration,
@@ -243,44 +228,37 @@ def _benign(seed: int) -> tuple[list[object], ScenarioLabels]:
 
 def _evil_twin(seed: int) -> tuple[list[object], ScenarioLabels]:
     rng = random.Random(seed + 2)
-    legit = KNOWN_APS[0]
     twin = AccessPoint(TWIN_BSSID, TWIN_SSID, 11, "02deadaa", -25, beacon_interval=70)
     packets: list[object] = []
     start_second = 15.0
     for index in range(12):
         seconds = start_second + index * 0.1
         packets.append(
-            _stamp(_build_beacon(legit, 300 + index, legit.beacon_interval, legit.rssi), seconds)
-        )
-        packets.append(
             _stamp(
                 _build_beacon(
-                    twin,
-                    700 + index,
-                    twin.beacon_interval + rng.randint(-1, 1),
-                    twin.rssi,
+                    twin, 700 + index, twin.beacon_interval + rng.randint(-1, 1), twin.rssi
                 ),
-                seconds + 0.02,
+                seconds,
             )
         )
-    packets.append(_stamp(_probe_request(LAB_CLIENTS[1], 800, TWIN_SSID), start_second + 2))
+    packets.append(_stamp(_probe_request(DEAUTH_CLIENT, 800, TWIN_SSID), start_second + 2))
     packets.sort(key=lambda packet: float(packet.time))
     labels = ScenarioLabels(
         scenario="evil_twin",
         attack_family="evil_twin_rogue_ap",
         label="suspicious",
-        bssids=(legit.bssid, twin.bssid),
-        ssids=(legit.ssid,),
-        clients=(LAB_CLIENTS[1],),
+        bssids=(twin.bssid,),
+        ssids=(twin.ssid,),
+        clients=(DEAUTH_CLIENT,),
         start=_timestamp(start_second),
         end=_timestamp(start_second + 4),
         packet_count=len(packets),
         details={
-            "legit_bssid": legit.bssid,
+            "legit_bssid": KNOWN_APS[0].bssid,
             "twin_bssid": twin.bssid,
-            "rssi_delta": twin.rssi - legit.rssi,
+            "rssi_delta": twin.rssi - KNOWN_APS[0].rssi,
             "oui_mismatch": True,
-            "channel_mismatch": legit.channel != twin.channel,
+            "channel_mismatch": KNOWN_APS[0].channel != twin.channel,
         },
     )
     return packets, labels
@@ -288,24 +266,22 @@ def _evil_twin(seed: int) -> tuple[list[object], ScenarioLabels]:
 
 def _deauth_burst(seed: int) -> tuple[list[object], ScenarioLabels]:
     rng = random.Random(seed + 3)
-    ap = KNOWN_APS[0]
     packets: list[object] = []
     start_second = 20.0
     for index in range(40):
-        seconds = start_second + index * 0.025
         packets.append(
             _stamp(
-                _radio(ap.channel, ap.rssi + rng.randint(-2, 2))
+                _radio(6, -43 + rng.randint(-2, 2))
                 / Dot11(
                     type=0,
                     subtype=12,
                     addr1=DEAUTH_CLIENT if index % 5 else BROADCAST,
-                    addr2=ap.bssid,
-                    addr3=ap.bssid,
+                    addr2=DEAUTH_BSSID,
+                    addr3=DEAUTH_BSSID,
                     SC=(1200 + index) << 4,
                 )
                 / Dot11Deauth(reason=7 if index % 3 else 1),
-                seconds,
+                start_second + index * 0.025,
             )
         )
     packets.sort(key=lambda packet: float(packet.time))
@@ -313,9 +289,9 @@ def _deauth_burst(seed: int) -> tuple[list[object], ScenarioLabels]:
         scenario="deauth_burst",
         attack_family="deauth_disassoc_anomaly",
         label="suspicious",
-        bssids=(ap.bssid,),
+        bssids=(DEAUTH_BSSID,),
         ssids=(),
-        clients=(DEAUTH_CLIENT, "ff:ff:ff:ff:ff:ff"),
+        clients=(DEAUTH_CLIENT, BROADCAST),
         start=_timestamp(start_second),
         end=_timestamp(start_second + 2),
         packet_count=len(packets),
@@ -326,14 +302,13 @@ def _deauth_burst(seed: int) -> tuple[list[object], ScenarioLabels]:
 
 def _karma(seed: int) -> tuple[list[object], ScenarioLabels]:
     rng = random.Random(seed + 4)
-    ap = AccessPoint("02:00:00:00:10:01", "FreeWiFi", 6, "020000", -31)
-    clients = LAB_CLIENTS[:2]
+    ap = AccessPoint(KARMA_BSSID, "FreeWiFi", 6, "020000", -31)
     packets: list[object] = []
     start_second = 30.0
     for index, ssid in enumerate(
         ("CoffeeShop", "Airport_Free", "Hotel_Guest", "FreeWiFi", "Mall_WiFi")
     ):
-        client = clients[index % len(clients)]
+        client = KARMA_CLIENTS[index % len(KARMA_CLIENTS)]
         seconds = start_second + index * 0.2
         packets.append(_stamp(_probe_request(client, 1500 + index, ssid), seconds))
         packets.append(
@@ -349,7 +324,7 @@ def _karma(seed: int) -> tuple[list[object], ScenarioLabels]:
         label="suspicious",
         bssids=(ap.bssid,),
         ssids=("CoffeeShop", "Airport_Free", "Hotel_Guest", "FreeWiFi", "Mall_WiFi"),
-        clients=clients,
+        clients=KARMA_CLIENTS,
         start=_timestamp(start_second),
         end=_timestamp(start_second + 1.5),
         packet_count=len(packets),
@@ -360,25 +335,16 @@ def _karma(seed: int) -> tuple[list[object], ScenarioLabels]:
 
 def _beacon_anomaly(seed: int) -> tuple[list[object], ScenarioLabels]:
     rng = random.Random(seed + 5)
-    ap = KNOWN_APS[2]
+    ap = AccessPoint(BEACON_ATTACK_BSSID, BEACON_ATTACK_SSID, 11, "02beac", -50)
     packets: list[object] = []
     start_second = 40.0
-    duplicate_sequence = 2200
     for index in range(14):
-        seconds = start_second + index * 0.1
         interval = 100 if index % 3 else rng.choice((20, 250, 500))
-        sequence = duplicate_sequence if index % 4 == 0 else 2300 + index
+        sequence = 2200 if index % 4 == 0 else 2300 + index
         packets.append(
             _stamp(
-                _build_beacon(
-                    AccessPoint(
-                        ap.bssid, ap.ssid, ap.channel, ap.oui, ap.rssi + rng.randint(-2, 2)
-                    ),
-                    sequence,
-                    interval,
-                    ap.rssi,
-                ),
-                seconds,
+                _build_beacon(ap, sequence, interval, ap.rssi + rng.randint(-2, 2)),
+                start_second + index * 0.1,
             )
         )
     packets.sort(key=lambda packet: float(packet.time))
@@ -420,18 +386,12 @@ def _shift_packet(packet: object, seconds: float) -> object:
 
 
 def _mixed_labels(
-    scenario: str,
-    benign: ScenarioLabels,
-    attack: ScenarioLabels,
-    shift: float,
-    packet_count: int,
+    scenario: str, benign: ScenarioLabels, attack: ScenarioLabels, shift: float, packet_count: int
 ) -> ScenarioLabels:
-    attack_start = attack.start
-    attack_end = attack.end
-    if attack_start is None or attack_end is None:
+    if attack.start is None or attack.end is None:
         raise ValueError("Attack labels need start and end timestamps")
-    shifted_start = datetime.fromtimestamp(attack_start.timestamp() + shift, tz=UTC)
-    shifted_end = datetime.fromtimestamp(attack_end.timestamp() + shift, tz=UTC)
+    shifted_start = datetime.fromtimestamp(attack.start.timestamp() + shift, tz=UTC)
+    shifted_end = datetime.fromtimestamp(attack.end.timestamp() + shift, tz=UTC)
     details = dict(attack.details)
     details.update(
         {
@@ -439,6 +399,8 @@ def _mixed_labels(
             "background": "benign_baseline",
             "attack_offset_seconds": shift,
             "attack_label": attack.scenario,
+            "attack_start": shifted_start.isoformat(),
+            "attack_end": shifted_end.isoformat(),
         }
     )
     return ScenarioLabels(
@@ -451,11 +413,7 @@ def _mixed_labels(
         start=benign.start,
         end=max(benign.end, shifted_end) if benign.end else shifted_end,
         packet_count=packet_count,
-        details={
-            **details,
-            "attack_start": shifted_start.isoformat(),
-            "attack_end": shifted_end.isoformat(),
-        },
+        details=details,
     )
 
 
@@ -473,7 +431,6 @@ def generate_dataset(out_dir: str | Path, seed: int = SEED) -> list[GeneratedSce
         path = destination / f"{name}.pcap"
         wrpcap(str(path), packets)
         generated.append(GeneratedScenario(name=name, path=path, labels=labels))
-
     benign_packets = scenario_packets["benign_baseline"]
     benign_labels = scenario_labels["benign_baseline"]
     for mixed_name, attack_name in MIXED_ATTACKS.items():
@@ -481,10 +438,7 @@ def generate_dataset(out_dir: str | Path, seed: int = SEED) -> list[GeneratedSce
             _shift_packet(packet, MIXED_ATTACK_START_SECONDS)
             for packet in scenario_packets[attack_name]
         ]
-        packets = sorted(
-            [*benign_packets, *shifted_attack],
-            key=lambda packet: float(packet.time),
-        )
+        packets = sorted([*benign_packets, *shifted_attack], key=lambda packet: float(packet.time))
         labels = _mixed_labels(
             mixed_name,
             benign_labels,
@@ -495,14 +449,12 @@ def generate_dataset(out_dir: str | Path, seed: int = SEED) -> list[GeneratedSce
         path = destination / f"{mixed_name}.pcap"
         wrpcap(str(path), packets)
         generated.append(GeneratedScenario(name=mixed_name, path=path, labels=labels))
-
     manifest = {
         "seed": seed,
         "generated_at": "deterministic",
         "scenarios": [item.labels.as_json() for item in generated],
     }
     (destination / "labels.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     return generated
