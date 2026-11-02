@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from wids_ai.parser.models import Frame
 
@@ -31,7 +31,7 @@ class KnownAP(BaseModel):
     ssid: str | None = None
     oui: str | None = None
     channels: tuple[int, ...] = ()
-    security: tuple[str, ...] = ()
+    security: str = "unknown"
     beacon_interval: float | None = None
     mean_rssi: float | None = None
     trust_score: int = Field(default=90, ge=0, le=100)
@@ -40,12 +40,17 @@ class KnownAP(BaseModel):
     last_seen: datetime | None = None
 
     @property
-    def channel_set(self) -> set[int]:
-        return set(self.channels)
+    @field_validator("security", mode="before")
+    @classmethod
+    def normalize_security(cls, value: object) -> str:
+        if isinstance(value, (list, tuple)):
+            modes = [str(item) for item in value if item and item != "unknown"]
+            return modes[-1] if modes else "unknown"
+        return str(value) if value else "unknown"
 
     @property
-    def security_set(self) -> set[str]:
-        return set(self.security)
+    def channel_set(self) -> set[int]:
+        return set(self.channels)
 
 
 class APInventory(BaseModel):
@@ -71,14 +76,15 @@ class APInventory(BaseModel):
             channels = tuple(
                 sorted({frame.channel for frame in proxy if frame.channel is not None})
             )
-            security = tuple(
-                sorted(
-                    {
-                        frame.security
-                        for frame in members
-                        if frame.subtype in {"beacon", "probe_response"}
-                    }
-                )
+            security_frames = [
+                frame
+                for frame in members
+                if frame.subtype in {"beacon", "probe_response"} and frame.security != "unknown"
+            ]
+            security = (
+                max(security_frames, key=lambda frame: frame.timestamp).security
+                if security_frames
+                else "unknown"
             )
             intervals = [
                 float(frame.beacon_interval)
@@ -117,6 +123,71 @@ class APInventory(BaseModel):
         if ap is None:
             return
         ap.trust_score = max(0, min(100, ap.trust_score + delta))
+        self.updated_at = datetime.now(tz=UTC)
+
+    def observe_frames(self, frames: Iterable[Frame]) -> None:
+        """Materialize every observed BSSID, including unknown APs."""
+        grouped: dict[str, list[Frame]] = {}
+        for frame in frames:
+            if frame.bssid and _is_unicast(frame.bssid):
+                grouped.setdefault(frame.bssid, []).append(frame)
+        for bssid, members in grouped.items():
+            beacons = [frame for frame in members if frame.subtype == "beacon"]
+            proxy = beacons or members
+            security_frames = [
+                frame
+                for frame in members
+                if frame.subtype in {"beacon", "probe_response"} and frame.security != "unknown"
+            ]
+            latest_security = (
+                max(security_frames, key=lambda frame: frame.timestamp).security
+                if security_frames
+                else "unknown"
+            )
+            rssi = [float(frame.rssi) for frame in members if frame.rssi is not None]
+            known = self.aps.get(bssid)
+            if known is None:
+                self.aps[bssid] = KnownAP(
+                    bssid=bssid,
+                    ssid=next((frame.ssid for frame in beacons if frame.ssid), None),
+                    oui=":".join(bssid.split(":")[:3]),
+                    channels=tuple(
+                        sorted({frame.channel for frame in proxy if frame.channel is not None})
+                    ),
+                    security=latest_security,
+                    beacon_interval=(
+                        max(
+                            (
+                                float(frame.beacon_interval)
+                                for frame in beacons
+                                if frame.beacon_interval is not None
+                            ),
+                            default=None,
+                        )
+                    ),
+                    mean_rssi=(sum(rssi) / len(rssi)) if rssi else None,
+                    trust_score=10,
+                    observations=len(members),
+                    first_seen=min(frame.timestamp for frame in members),
+                    last_seen=max(frame.timestamp for frame in members),
+                )
+                continue
+            known.ssid = known.ssid or next((frame.ssid for frame in beacons if frame.ssid), None)
+            known.channels = tuple(
+                sorted(
+                    {
+                        *known.channels,
+                        *(frame.channel for frame in proxy if frame.channel is not None),
+                    }
+                )
+            )
+            known.security = latest_security if latest_security != "unknown" else known.security
+            known.mean_rssi = (sum(rssi) / len(rssi)) if rssi else known.mean_rssi
+            known.observations += len(members)
+            known.first_seen = min(
+                filter(None, [known.first_seen, min(frame.timestamp for frame in members)])
+            )
+            known.last_seen = max(frame.timestamp for frame in members)
         self.updated_at = datetime.now(tz=UTC)
 
     def save(self, path: str | Path) -> None:

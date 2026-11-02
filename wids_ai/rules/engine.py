@@ -333,8 +333,7 @@ def evaluate_rules(
             detection = evaluate_rule(rule, row, window_frames, inventory)
             if detection is not None:
                 detections.append(detection)
-                for bssid in detection.bssids:
-                    inventory.adjust_trust(bssid, -1)
+
     return detections
 
 

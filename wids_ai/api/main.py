@@ -57,9 +57,10 @@ class APResponse(BaseModel):
     oui: str | None
     channels: list[int]
     rssi: float | None
-    security: list[str]
+    security: str
     trust_score: int
     flagged: bool
+    flag_reason: str | None = None
 
 
 class AlertResponse(BaseModel):

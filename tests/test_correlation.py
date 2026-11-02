@@ -57,7 +57,7 @@ def _inventory() -> APInventory:
                 ssid="LabNet",
                 oui="00:11:22",
                 channels=(6,),
-                security=("open",),
+                security="open",
                 trust_score=50,
             )
         }

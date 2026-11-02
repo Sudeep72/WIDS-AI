@@ -33,7 +33,7 @@ def _inventory() -> APInventory:
                 ssid="LabNet",
                 oui="001122",
                 channels=(6,),
-                security=("open",),
+                security="open",
                 mean_rssi=-42,
             )
         }
@@ -307,7 +307,7 @@ def test_inventory_trust_is_bounded_and_updated() -> None:
     assert inventory.aps["00:11:22:33:44:55"].trust_score == 90
     detections = evaluate_rules([row], [rule], [], inventory)
     assert detections
-    assert inventory.aps["00:11:22:33:44:55"].trust_score == 89
+    assert inventory.aps["00:11:22:33:44:55"].trust_score == 90
     inventory.adjust_trust("00:11:22:33:44:55", -500)
     assert inventory.aps["00:11:22:33:44:55"].trust_score == 0
 

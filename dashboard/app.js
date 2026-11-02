@@ -35,7 +35,7 @@ function renderCounts(container, counts) {
 function renderSparkline(scores) {
   const svg = byId("ml-sparkline");
   svg.replaceChildren();
-  if (!scores || scores.length === 0) return;
+  if (!scores || scores.length === 0) {\n    const empty = document.createElementNS("http://www.w3.org/2000/svg", "text");\n    empty.setAttribute("x", "12");\n    empty.setAttribute("y", "44");\n    empty.setAttribute("class", "sparkline-empty");\n    empty.textContent = "No ML score data";\n    svg.append(empty);\n    return;\n  }
   const width = 320;
   const height = 80;
   const step = scores.length > 1 ? width / (scores.length - 1) : width;
@@ -55,7 +55,7 @@ function renderAPs(aps) {
   body.replaceChildren();
   (aps || []).forEach((ap) => {
     const row = document.createElement("tr");
-    const values = [ap.ssid || "-", ap.bssid, ap.oui || "-", (ap.channels || []).join(","), ap.rssi, (ap.security || []).join(",")];
+    const rssi = ap.rssi === null || ap.rssi === undefined ? "-" : `${Number(ap.rssi).toFixed(1)} dBm`;\n    const values = [ap.ssid || "-", ap.bssid, ap.oui || "-", (ap.channels || []).join(","), rssi, ap.security || "unknown"];
     values.forEach((value) => {
       const cell = document.createElement("td");
       setText(cell, value);
@@ -74,7 +74,7 @@ function renderAPs(aps) {
     trustCell.append(trustNumber);
     row.append(trustCell);
     const flaggedCell = document.createElement("td");
-    setText(flaggedCell, ap.flagged ? "Yes" : "No");
+    setText(flaggedCell, ap.flagged ? `Yes: ${ap.flag_reason || "flagged"}` : "No");
     row.append(flaggedCell);
     body.append(row);
   });

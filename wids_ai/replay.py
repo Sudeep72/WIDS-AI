@@ -35,7 +35,7 @@ def _score_alerts(
     trusted_model_root: Path,
     correlation_config: CorrelationConfig,
 ):
-    ml_scores: list[float] = []
+    ml_scores = []
     for scope in ("bssid", "client", "ssid"):
         model_dir = model_root / scope
         if not (model_dir / "isolation_forest.joblib").is_file():
@@ -45,10 +45,14 @@ def _score_alerts(
         if not scope_rows:
             continue
         scope_scores = score_rows(model, scope_rows)
-        ml_scores.extend(
-            item.anomaly_score for item in aggregate_window_scores(scope_scores, method="max")
-        )
-    return correlate(incidents, ml_scores, inventory, correlation_config)
+        ml_scores.extend(aggregate_window_scores(scope_scores, method="max"))
+    alerts = correlate(
+        incidents,
+        [item.anomaly_score for item in ml_scores],
+        inventory,
+        correlation_config,
+    )
+    return alerts, ml_scores
 
 
 def replay_pcap(
@@ -91,7 +95,7 @@ def replay_pcap(
         FeatureRow.model_validate(item.to_dict()) for _, item in feature_frame.iterrows()
     ]
     incidents = deduplicate(evaluate_rules(feature_rows, rules, frame_rows, inventory))
-    alerts = _score_alerts(
+    alerts, ml_scores = _score_alerts(
         incidents,
         feature_rows,
         Path(model_root),
@@ -99,14 +103,48 @@ def replay_pcap(
         trusted_root,
         correlation_config,
     )
+    inventory.observe_frames(frame_rows)
+    flagged: set[str] = set()
+    flag_reasons: dict[str, str] = {}
+    trusted_bssids = {bssid for bssid, ap in inventory.aps.items() if ap.trust_score >= 50}
+    ssids_by_bssid: dict[str, str] = {}
+    for frame in frame_rows:
+        if frame.bssid and frame.ssid:
+            ssids_by_bssid.setdefault(frame.bssid, frame.ssid)
+    for bssid, ssid in ssids_by_bssid.items():
+        duplicate = any(
+            other != bssid and other_ssid == ssid for other, other_ssid in ssids_by_bssid.items()
+        )
+        if bssid not in trusted_bssids:
+            flagged.add(bssid)
+            flag_reasons[bssid] = "not in trusted inventory"
+            inventory.adjust_trust(bssid, -10)
+        elif duplicate:
+            flagged.add(bssid)
+            flag_reasons[bssid] = "duplicate SSID"
     run_id = database.start_run(str(source))
-    flagged = {bssid for alert in alerts for bssid in alert.bssids}
-    database.save_inventory(inventory, flagged)
+    database.save_inventory(inventory, flagged, flag_reasons)
     if sleep and speed > 0:
         simulated = (frame_rows[-1].timestamp - frame_rows[0].timestamp).total_seconds()
         time.sleep(min(simulated / speed, 1.0))
     for alert in alerts:
         database.save_alert(alert, run_id)
+    score_windows = {}
+    for score in ml_scores:
+        score_windows.setdefault(score.window_start, []).append(
+            (score.window_end, score.anomaly_score)
+        )
+    database.save_ml_scores(
+        run_id,
+        [
+            {
+                "window_start": start.isoformat(),
+                "window_end": max(end for end, _score in values).isoformat(),
+                "score": max(score for _end, score in values),
+            }
+            for start, values in sorted(score_windows.items())
+        ],
+    )
     database.finish_run(run_id, len(frame_rows), len(feature_rows))
     LOGGER.info("Replay wrote %d alerts from %d frames", len(alerts), len(frame_rows))
     return ReplayResult(frames=len(frame_rows), windows=len(feature_rows), alerts=len(alerts))

@@ -21,7 +21,7 @@ def _ap(ssid: str = "LabNet") -> APInventory:
                 ssid=ssid,
                 oui="00:11:22",
                 channels=(6,),
-                security=("open",),
+                security="open",
                 trust_score=70,
             )
         }
@@ -68,10 +68,10 @@ def test_db_round_trip_and_migration(tmp_path: Path) -> None:
     assert db.get_alert("ALT-1")["family"] == "evil_twin_rogue_ap"
     assert db.list_alerts(limit=50)[0]["id"] == "ALT-1"
     assert db.list_aps()[0]["trust_score"] == 70
-    assert db.get_stats()["frames_processed"] == 0
+    assert db.get_stats()["frames_processed"] == 10
     with sqlite3.connect(tmp_path / "wids.db") as connection:
         version = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-    assert version == 1
+    assert version == 2
 
 
 def test_api_endpoints_and_security_headers(tmp_path: Path) -> None:
@@ -143,6 +143,9 @@ def test_dashboard_assets_have_no_external_urls_or_dangerous_sinks() -> None:
     assert not any(token in js for token in forbidden)
     assert "/static/app.js" in html
     assert "/static/style.css" in html
+    assert "section + section" in css
+    assert "No ML score data" in js
+    assert "dBm" in js
 
 
 @pytest.mark.slow
@@ -187,3 +190,67 @@ def test_replay_mixed_and_benign(tmp_path: Path, synthetic_dataset) -> None:
     assert all(
         item["severity"] in {"informational", "low"} for item in benign_db.list_alerts(limit=50)
     )
+
+
+@pytest.mark.slow
+def test_replay_ap_state_frames_and_sparkline(tmp_path: Path, synthetic_dataset) -> None:
+    from fastapi.testclient import TestClient
+
+    from wids_ai.api.main import create_app
+    from wids_ai.capture.base import PcapSource
+    from wids_ai.parser.dot11 import parse_frame
+    from wids_ai.replay import replay_pcap
+
+    dataset = synthetic_dataset(42)
+    inventory_path = tmp_path / "inventory.json"
+    benign_frames = [
+        frame
+        for packet in PcapSource(dataset / "benign_baseline.pcap").packets()
+        if (frame := parse_frame(packet)) is not None
+    ]
+    APInventory.from_frames(benign_frames).save(inventory_path)
+    db = Database(tmp_path / "ap.db")
+    result = replay_pcap(
+        dataset / "mixed_evil_twin.pcap",
+        db,
+        inventory_path=inventory_path,
+        model_root=tmp_path / "models",
+        trusted_model_root=tmp_path,
+        sleep=False,
+    )
+    client = TestClient(create_app(db))
+    aps = {item["bssid"]: item for item in client.get("/api/aps").json()}
+    assert aps["02:de:ad:be:ef:01"]["flagged"] is True
+    assert aps["02:de:ad:be:ef:01"]["flag_reason"] == "not in trusted inventory"
+    assert aps["02:de:ad:be:ef:01"]["trust_score"] < 50
+    assert aps["00:11:22:33:44:55"]["trust_score"] >= 80
+    assert aps["00:11:22:33:44:55"]["flagged"] is True
+    assert aps["00:11:22:33:44:55"]["flag_reason"] == "duplicate SSID"
+    stats = client.get("/api/stats").json()
+    assert stats["frames_processed"] == result.frames
+    assert stats["latest_ml_scores"]
+    assert all(0.0 <= item["score"] <= 1.0 for item in stats["latest_ml_scores"])
+    for ap in aps.values():
+        assert ap["rssi"] is None or round(ap["rssi"], 1) == ap["rssi"]
+        assert isinstance(ap["security"], str)
+
+
+def test_ap_security_is_single_mode_and_rssi_rounded(tmp_path: Path) -> None:
+    db = Database(tmp_path / "api.db")
+    inventory = APInventory(
+        aps={
+            "00:11:22:33:44:55": KnownAP(
+                bssid="00:11:22:33:44:55",
+                ssid="LabNet",
+                oui="00:11:22",
+                channels=(6,),
+                security="open",
+                mean_rssi=-42.12345,
+                trust_score=90,
+            )
+        }
+    )
+    db.save_inventory(inventory)
+    ap = db.list_aps()[0]
+    assert ap["security"] == "open"
+    assert ap["rssi"] == -42.1

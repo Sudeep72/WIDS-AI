@@ -14,7 +14,7 @@ from typing import Any
 from wids_ai.correlation.schema import Alert
 from wids_ai.inventory import APInventory
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DDL = (
     """
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -43,6 +43,7 @@ DDL = (
         security TEXT NOT NULL DEFAULT '[]',
         trust_score INTEGER NOT NULL DEFAULT 0,
         flagged INTEGER NOT NULL DEFAULT 0,
+        flag_reason TEXT,
         updated_at TEXT NOT NULL
     )
     """,
@@ -64,6 +65,15 @@ DDL = (
     "CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity)",
     "CREATE INDEX IF NOT EXISTS idx_alerts_family ON alerts(family)",
     "CREATE INDEX IF NOT EXISTS idx_alerts_risk ON alerts(risk_score)",
+    """
+    CREATE TABLE IF NOT EXISTS ml_scores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER,
+        window_start TEXT NOT NULL,
+        window_end TEXT NOT NULL,
+        score REAL NOT NULL
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS incidents (
         id TEXT PRIMARY KEY,
@@ -91,6 +101,19 @@ DDL = (
     )
     """,
 )
+
+
+def _security_value(raw: str) -> str:
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return "unknown"
+    if isinstance(value, str):
+        return value or "unknown"
+    if isinstance(value, list):
+        modes = [str(item) for item in value if item and item != "unknown"]
+        return modes[-1] if modes else "unknown"
+    return "unknown"
 
 
 class Database:
@@ -135,6 +158,11 @@ class Database:
             if current < SCHEMA_VERSION:
                 for statement in DDL[1:]:
                     connection.execute(statement)
+                columns = {
+                    row["name"] for row in connection.execute("PRAGMA table_info(aps)").fetchall()
+                }
+                if "flag_reason" not in columns:
+                    connection.execute("ALTER TABLE aps ADD COLUMN flag_reason TEXT")
                 connection.execute(
                     "INSERT OR REPLACE INTO schema_version(version, applied_at) VALUES (?, ?)",
                     (SCHEMA_VERSION, datetime.now(tz=UTC).isoformat()),
@@ -156,15 +184,21 @@ class Database:
                 (datetime.now(tz=UTC).isoformat(), frame_count, window_count, run_id),
             )
 
-    def save_inventory(self, inventory: APInventory, flagged: set[str] | None = None) -> None:
+    def save_inventory(
+        self,
+        inventory: APInventory,
+        flagged: set[str] | None = None,
+        flag_reasons: dict[str, str] | None = None,
+    ) -> None:
         flagged = flagged or set()
+        flag_reasons = flag_reasons or {}
         now = datetime.now(tz=UTC).isoformat()
         with self.transaction() as connection:
             for bssid, ap in inventory.aps.items():
                 connection.execute(
                     """
-                    INSERT INTO aps(bssid, ssid, oui, channels, rssi, security, trust_score, flagged, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO aps(bssid, ssid, oui, channels, rssi, security, trust_score, flagged, flag_reason, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(bssid) DO UPDATE SET
                         ssid = excluded.ssid,
                         oui = excluded.oui,
@@ -173,6 +207,7 @@ class Database:
                         security = excluded.security,
                         trust_score = excluded.trust_score,
                         flagged = excluded.flagged,
+                        flag_reason = excluded.flag_reason,
                         updated_at = excluded.updated_at
                     """,
                     (
@@ -180,10 +215,11 @@ class Database:
                         ap.ssid,
                         ap.oui,
                         json.dumps(list(ap.channels)),
-                        ap.mean_rssi,
-                        json.dumps(list(ap.security)),
+                        round(float(ap.mean_rssi), 1) if ap.mean_rssi is not None else None,
+                        json.dumps(ap.security),
                         ap.trust_score,
                         1 if bssid in flagged else 0,
+                        flag_reasons.get(bssid),
                         now,
                     ),
                 )
@@ -210,6 +246,16 @@ class Database:
                     json.dumps(list(alert.clients)),
                     json.dumps(payload),
                 ),
+            )
+
+    def save_ml_scores(self, run_id: int, scores: list[dict[str, Any]]) -> None:
+        with self.transaction() as connection:
+            connection.executemany(
+                "INSERT INTO ml_scores(run_id, window_start, window_end, score) VALUES (?, ?, ?, ?)",
+                [
+                    (run_id, item["window_start"], item["window_end"], item["score"])
+                    for item in scores
+                ],
             )
 
     def save_frame_summaries(self, run_id: int, summaries: list[dict[str, Any]]) -> None:
@@ -244,9 +290,10 @@ class Database:
 
     def get_stats(self) -> dict[str, Any]:
         connection = self.connection()
-        frame_count = connection.execute(
-            "SELECT COUNT(*) AS count FROM frame_summaries"
-        ).fetchone()["count"]
+        frame_row = connection.execute(
+            "SELECT COALESCE(SUM(frame_count), 0) AS frames FROM runs"
+        ).fetchone()
+        frame_count = int(frame_row["frames"] or 0)
         run_rows = connection.execute(
             "SELECT COALESCE(SUM(window_count), 0) AS windows FROM runs"
         ).fetchone()
@@ -320,7 +367,7 @@ class Database:
         rows = (
             self.connection()
             .execute(
-                "SELECT bssid, ssid, oui, channels, rssi, security, trust_score, flagged FROM aps ORDER BY bssid"
+                "SELECT bssid, ssid, oui, channels, rssi, security, trust_score, flagged, flag_reason FROM aps ORDER BY bssid"
             )
             .fetchall()
         )
@@ -334,6 +381,7 @@ class Database:
                 "security": json.loads(row["security"]),
                 "trust_score": row["trust_score"],
                 "flagged": bool(row["flagged"]),
+                "flag_reason": row["flag_reason"],
             }
             for row in rows
         ]

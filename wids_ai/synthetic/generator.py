@@ -157,7 +157,7 @@ def _probe_response(ap: AccessPoint, client: str, sequence: int, ssid: str, rssi
             addr3=ap.bssid,
             SC=(sequence & 0xFFF) << 4,
         )
-        / Dot11ProbeResp(cap=0x0401, beacon_interval=ap.beacon_interval)
+        / Dot11ProbeResp(cap=0x0411 if ap.privacy else 0x0401, beacon_interval=ap.beacon_interval)
         / _ssid(ssid)
     )
 
