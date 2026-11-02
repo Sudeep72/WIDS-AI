@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WIDS-AI</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>WIDS-AI</h1>
+    <div class="controls">
+      <label for="severity-filter">Severity</label>
+      <select id="severity-filter">
+        <option value="">All</option>
+        <option value="critical">Critical</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+        <option value="informational">Informational</option>
+      </select>
+      <button id="pause-button" type="button">Pause</button>
+      <span id="poll-status" class="muted">Polling</span>
+    </div>
+  </header>
+  <main>
+    <section class="stats" aria-label="Statistics">
+      <div class="card"><span class="label">Frames</span><strong id="stat-frames">0</strong></div>
+      <div class="card"><span class="label">Windows</span><strong id="stat-windows">0</strong></div>
+      <div class="card wide">
+        <span class="label">Alerts by severity</span>
+        <div id="severity-counts" class="counts"></div>
+      </div>
+      <div class="card wide">
+        <span class="label">Alerts by family</span>
+        <div id="family-counts" class="counts"></div>
+      </div>
+      <div class="card wide">
+        <span class="label">ML anomaly score</span>
+        <svg id="ml-sparkline" viewBox="0 0 320 80" role="img" aria-label="ML anomaly score trend"></svg>
+      </div>
+    </section>
+    <section>
+      <h2>Access points</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>SSID</th><th>BSSID</th><th>OUI</th><th>Channel</th><th>RSSI</th><th>Security</th><th>Trust</th><th>Flagged</th></tr></thead>
+          <tbody id="aps-body"></tbody>
+        </table>
+      </div>
+    </section>
+    <section>
+      <h2>Alerts</h2>
+      <div id="empty-state" class="empty">No alerts yet.</div>
+      <div id="error-state" class="error" hidden></div>
+      <ul id="alerts-list" class="alerts"></ul>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

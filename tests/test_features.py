@@ -104,6 +104,7 @@ def test_deauth_window_has_high_rate() -> None:
     assert peak["deauth_received_rate"] > 0
 
 
+@pytest.mark.slow
 def test_evil_twin_window_has_two_bssids_for_one_ssid(synthetic_dir: Path) -> None:
     frames = _frames(synthetic_dir / "evil_twin.pcap")
     result = extract_features(frames, WindowConfig(10, 5), scopes=("ssid",))

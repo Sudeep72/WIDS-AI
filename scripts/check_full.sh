@@ -7,5 +7,4 @@ if [[ ! -x "$PYTHON" ]]; then
   echo "Missing .venv. Run scripts/setup.sh first." >&2
   exit 1
 fi
-export PYTEST_ADDOPTS="--basetemp=.tmp/pytest-full -m 'slow or not slow'"
-exec "$PYTHON" scripts/check.py
+exec "$PYTHON" scripts/check.py --slow

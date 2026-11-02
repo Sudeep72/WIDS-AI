@@ -61,3 +61,51 @@ Related incidents are grouped by family, overlapping BSSID entities, and a
 mapping is duplicated in alert code. Explanations are deterministic templates built
 only from rule evidence fields and the ML score. The alert never claims that ML or
 a best-fit ATT&CK mapping establishes certainty.
+## M8 data flow
+
+```text
+PCAP / guarded live capture
+          |
+          v
+     802.11 parser
+          |
+          v
+ timestamp windows -> feature extraction
+          |                    |
+          v                    v
+    YAML rules          scope ML models
+          \                    /
+           +------ correlation ------+
+                      |
+                      v
+              rule evidence + ML + trust
+                      |
+                      v
+                 SQLite database
+                      |
+                      v
+               read-only FastAPI
+                      |
+                      v
+              offline dashboard
+```
+
+## API reference
+
+All endpoints are read-only and bind to `127.0.0.1` by default. Every response
+carries CSP `default-src 'self'`, `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer`.
+
+- `GET /api/health` returns `{"status":"ok","schema_version":1}`.
+- `GET /api/stats` returns frame and window counts, alert counts by severity and
+  family, and the latest ML score samples.
+- `GET /api/aps` returns SSID, BSSID, vendor OUI, channels, RSSI, security, trust
+  score, and flagged state.
+- `GET /api/alerts?severity=&family=&since=&limit=50&offset=0` returns alert JSON.
+  Limit is capped at 500. Invalid severity, family, since, limit, or offset returns
+  HTTP 422.
+- `GET /api/alerts/{id}` returns full evidence, indicators found and not found,
+  why text, and the ATT&CK mapping.
+
+SSIDs and other frame-derived strings are control-character stripped and truncated
+in the API and rendered with `textContent` in the dashboard.

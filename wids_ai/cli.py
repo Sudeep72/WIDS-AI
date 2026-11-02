@@ -26,7 +26,9 @@ from wids_ai.ml.isolation_forest import (
     write_scores,
 )
 from wids_ai.parser.dot11 import parse_frame
+from wids_ai.replay import replay_pcap
 from wids_ai.rules.engine import deduplicate, evaluate_rules, load_rules
+from wids_ai.storage.db import Database
 
 LOGGER = logging.getLogger(__name__)
 
@@ -62,6 +64,15 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--out", type=Path, default=Path("models"))
             command.add_argument("--seed", type=int, default=42)
             command.add_argument("--contamination", type=float, default=0.05)
+        if name == "serve":
+            command.add_argument("--replay", type=Path)
+            command.add_argument("--speed", type=float, default=20.0)
+            command.add_argument("--inventory", type=Path)
+            command.add_argument("--model", type=Path, default=Path("models"))
+            command.add_argument("--trusted-model-root", type=Path, default=PROJECT_ROOT / "models")
+            command.add_argument("--rules", type=Path, default=Path("wids_ai/rules/rules"))
+            command.add_argument("--db", type=Path, default=Path("data/wids.db"))
+            command.add_argument("--loop", action="store_true")
         if name == "score":
             command.add_argument("pcap", type=Path)
             command.add_argument("--model", type=Path, required=True)
@@ -190,6 +201,36 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"Scored {len(values)} rows: mean={sum(values) / len(values):.4f} "
             f"max={max(values):.4f} -> {args.out}"
         )
+        return 0
+    if args.command == "serve":
+        database = Database(args.db)
+        if args.replay is not None:
+            inventory_path = args.inventory
+            if inventory_path is None:
+                inventory_path = Path(args.db).parent / "replay-inventory.json"
+                if not inventory_path.exists():
+                    LOGGER.info(
+                        "No inventory supplied; building one from benign frames is required"
+                    )
+            result = replay_pcap(
+                args.replay,
+                database,
+                inventory_path=inventory_path if inventory_path.exists() else None,
+                model_root=args.model,
+                rules_dir=args.rules,
+                trusted_model_root=args.trusted_model_root,
+                speed=args.speed,
+                loop=args.loop,
+            )
+            print(
+                f"Replay: {result.frames} frames, {result.windows} feature rows, {result.alerts} alerts"
+            )
+            print(f"Inventory: {inventory_path}")
+        import uvicorn
+
+        from wids_ai.api.main import create_app
+
+        uvicorn.run(create_app(database), host=settings.api.host, port=settings.api.port)
         return 0
     if args.command == "live":
         source = LiveSource(args.iface, args.channel)

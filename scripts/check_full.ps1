@@ -5,6 +5,5 @@ if (-not (Test-Path -LiteralPath $Python)) {
     throw "Missing .venv. Run scripts\setup.ps1 first."
 }
 Set-Location -LiteralPath $Root
-$env:PYTEST_ADDOPTS = "--basetemp=.tmp/pytest-full -m ''slow or not slow''"
-& $Python scripts\check.py
+& $Python scripts\check.py --slow
 exit $LASTEXITCODE
