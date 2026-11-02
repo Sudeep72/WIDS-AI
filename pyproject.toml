@@ -34,10 +34,11 @@ wids-ai = "wids_ai.cli:main"
 include = ["wids_ai*"]
 
 [tool.pytest.ini_options]
-addopts = "--basetemp=.tmp/pytest"
+addopts = "--basetemp=.tmp/pytest -m 'not slow'"
 cache_dir = ".tmp/pytest_cache"
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = ["slow: long-running robustness and evaluation tests"]
 
 [tool.ruff]
 target-version = "py311"

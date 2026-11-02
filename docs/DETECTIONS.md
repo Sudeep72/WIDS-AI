@@ -164,3 +164,18 @@ BSSID 1, probe responses per BSSID 1, and BSSID count per SSID 1.
 - `WIDS-EVIL-003` now checks inventory channel or security mismatch. Generic RSN
   inconsistency was removed from this rule because it mislabeled a beacon
   anomaly as an evil-twin event.
+## ATT&CK mapping review
+
+Verified against attack.mitre.org on 2026-11-02:
+
+- T1557 Adversary-in-the-Middle, Enterprise. Used for evil twin and KARMA style
+  evidence. Verified at https://attack.mitre.org/techniques/T1557/.
+- T1498 Network Denial of Service, Enterprise. Used as the best fit for deauth and
+  disassociation bursts. Verified at https://attack.mitre.org/techniques/T1498/.
+- T1464 Network Denial of Service is a Mobile technique. It was removed from beacon
+  anomaly mappings because the project processes Enterprise 802.11 infrastructure.
+- Beacon and sequence anomalies have no forced technique. Their mapping is
+  `none, spoofing or evasion indicator` and is marked unverified by design.
+
+These are best-fit mappings, not certainty claims. Verify before publishing or using
+operationally.

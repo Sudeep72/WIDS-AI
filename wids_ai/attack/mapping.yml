@@ -1,59 +1,62 @@
-# Best-fit ATT&CK mappings. Verify every entry at attack.mitre.org before use.
+# ATT&CK mappings verified at attack.mitre.org on 2026-11-02.
+# Verify before publishing or operational use.
 families:
-  # Best-fit mapping. Verify at attack.mitre.org.
+  # Verified Enterprise mapping. T1557 Adversary-in-the-Middle.
   evil_twin_rogue_ap:
-    tactic: "Initial Access"
+    tactic: "Credential Access"
     technique: "T1557"
     technique_name: "Adversary-in-the-Middle"
-  # Best-fit mapping. Verify at attack.mitre.org.
+    matrix: "Enterprise"
+    verified: true
+    verification_url: "https://attack.mitre.org/techniques/T1557/"
+  # Verified Enterprise best fit. T1498 Network Denial of Service.
   deauth_disassoc_anomaly:
     tactic: "Impact"
-    technique: "T1464"
-    technique_name: "Network DoS"
-  # Best-fit mapping. Verify at attack.mitre.org.
+    technique: "T1498"
+    technique_name: "Network Denial of Service"
+    matrix: "Enterprise"
+    verified: true
+    verification_url: "https://attack.mitre.org/techniques/T1498/"
+  # Verified Enterprise mapping. T1557 Adversary-in-the-Middle.
   probe_response_karma:
-    tactic: "Initial Access"
+    tactic: "Credential Access"
     technique: "T1557"
     technique_name: "Adversary-in-the-Middle"
-  # Best-fit mapping. Verify at attack.mitre.org.
+    matrix: "Enterprise"
+    verified: true
+    verification_url: "https://attack.mitre.org/techniques/T1557/"
+  # No forced ATT&CK technique. Treat as spoofing or evasion indicator.
   beacon_management_anomaly:
-    tactic: "Impact"
-    technique: "T1464"
-    technique_name: "Network DoS"
+    tactic: null
+    technique: null
+    technique_name: "none, spoofing or evasion indicator"
+    matrix: null
+    verified: false
+    verification_url: null
 refs:
-  # Best-fit reference. Verify at attack.mitre.org.
+  # Verified mapping. Verify before publishing.
   evil_twin: evil_twin_rogue_ap
-  # Best-fit reference. Verify at attack.mitre.org.
+  # Verified mapping. Verify before publishing.
   deauth: deauth_disassoc_anomaly
-  # Best-fit reference. Verify at attack.mitre.org.
+  # Verified mapping. Verify before publishing.
   karma: probe_response_karma
-  # Best-fit reference. Verify at attack.mitre.org.
+  # No forced technique. Treat as spoofing or evasion indicator.
   beacon_anomaly: beacon_management_anomaly
 rules:
-  # Best-fit mapping. Verify at attack.mitre.org.
+  # Verified Enterprise mapping. Verify at attack.mitre.org before publishing.
   WIDS-EVIL-001: evil_twin_rogue_ap
-  # Best-fit mapping. Verify at attack.mitre.org.
   WIDS-EVIL-002: evil_twin_rogue_ap
-  # Best-fit mapping. Verify at attack.mitre.org.
   WIDS-EVIL-003: evil_twin_rogue_ap
-  # Best-fit mapping. Verify at attack.mitre.org.
   WIDS-EVIL-004: evil_twin_rogue_ap
-  # Best-fit mapping. Verify at attack.mitre.org.
+  # Verified Enterprise mapping. Verify at attack.mitre.org before publishing.
   WIDS-DEAUTH-001: deauth_disassoc_anomaly
-  # Best-fit mapping. Verify at attack.mitre.org.
   WIDS-DEAUTH-002: deauth_disassoc_anomaly
-  # Best-fit mapping. Verify at attack.mitre.org.
   WIDS-DEAUTH-003: deauth_disassoc_anomaly
-  # Best-fit mapping. Verify at attack.mitre.org.
   WIDS-DEAUTH-004: deauth_disassoc_anomaly
-  # Best-fit mapping. Verify at attack.mitre.org.
+  # Verified Enterprise mapping. Verify at attack.mitre.org before publishing.
   WIDS-KARMA-001: probe_response_karma
-  # Best-fit mapping. Verify at attack.mitre.org.
   WIDS-KARMA-002: probe_response_karma
-  # Best-fit mapping. Verify at attack.mitre.org.
+  # No forced technique. Spoofing or evasion indicator.
   WIDS-BEACON-001: beacon_management_anomaly
-  # Best-fit mapping. Verify at attack.mitre.org.
   WIDS-BEACON-002: beacon_management_anomaly
-  # Best-fit mapping. Verify at attack.mitre.org.
   WIDS-BEACON-003: beacon_management_anomaly
-  # Best-fit mapping. Verify at attack.mitre.org.

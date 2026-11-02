@@ -20,10 +20,8 @@ def _generate(tmp_path: Path, seed: int = 42) -> tuple[Path, dict[str, dict[str,
 
 
 @pytest.fixture(scope="session")
-def generated(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> tuple[Path, dict[str, dict[str, object]]]:
-    return _generate(tmp_path_factory.mktemp("synthetic-session"))
+def generated(synthetic_dataset) -> tuple[Path, dict[str, dict[str, object]]]:
+    return _generate(synthetic_dataset(42))
 
 
 @pytest.fixture(scope="session")
@@ -41,6 +39,7 @@ def parsed_frames(
     return result
 
 
+@pytest.mark.slow
 def test_same_seed_is_byte_deterministic(
     generated: tuple[Path, dict[str, dict[str, object]]], tmp_path: Path
 ) -> None:
@@ -53,6 +52,7 @@ def test_same_seed_is_byte_deterministic(
         assert left.read_bytes() == right.read_bytes()
 
 
+@pytest.mark.slow
 def test_different_seed_changes_benign_packets(
     generated: tuple[Path, dict[str, dict[str, object]]], tmp_path: Path
 ) -> None:

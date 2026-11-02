@@ -319,13 +319,17 @@ def evaluate_rules(
     if unknown_refs:
         raise RuleValidationError(f"Unknown attack_ref values: {sorted(unknown_refs)}")
     detections: list[Detection] = []
+    rules_by_scope: dict[str, list[RuleDefinition]] = {}
+    for rule in rule_list:
+        rules_by_scope.setdefault(rule.scope, []).append(rule)
     for row in rows:
+        scope_rules = rules_by_scope.get(row.scope, [])
+        if not scope_rules:
+            continue
         left = bisect_left(timestamps, row.window_start)
         right = bisect_left(timestamps, row.window_end)
         window_frames = frame_list[left:right]
-        for rule in rule_list:
-            if rule.scope != row.scope:
-                continue
+        for rule in scope_rules:
             detection = evaluate_rule(rule, row, window_frames, inventory)
             if detection is not None:
                 detections.append(detection)

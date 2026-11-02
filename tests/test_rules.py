@@ -68,19 +68,9 @@ def _loaded_frames(pcap: Path) -> list[Frame]:
 
 
 @pytest.fixture(scope="session")
-def parsed(synthetic: Path) -> dict[str, tuple[list[Frame], list[FeatureRow]]]:
-    result: dict[str, tuple[list[Frame], list[FeatureRow]]] = {}
-    for name in (
-        "benign_baseline",
-        "mixed_evil_twin",
-        "mixed_deauth_burst",
-        "mixed_karma_probe_responses",
-        "mixed_beacon_sequence_anomaly",
-    ):
-        frames = _loaded_frames(synthetic / f"{name}.pcap")
-        feature_frame = batch_extract(frames, WindowConfig(10, 5))
-        rows = [FeatureRow.model_validate(item.to_dict()) for _, item in feature_frame.iterrows()]
-        result[name] = (frames, rows)
+def parsed(synthetic: Path, parsed_synthetic) -> dict[str, tuple[list[Frame], list[FeatureRow]]]:
+    cached_dataset, result = parsed_synthetic
+    assert cached_dataset == synthetic
     return result
 
 
@@ -94,10 +84,8 @@ def _detections(
 
 
 @pytest.fixture(scope="session")
-def synthetic(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    out = tmp_path_factory.mktemp("rules-synthetic") / "synthetic"
-    generate_dataset(out, seed=42)
-    return out
+def synthetic(synthetic_dataset) -> Path:
+    return synthetic_dataset(42)
 
 
 @pytest.fixture(scope="session")
@@ -283,6 +271,7 @@ def test_detection_starts_in_labeled_attack_window(
     assert start - tolerance <= first <= end + tolerance
 
 
+@pytest.mark.slow
 def test_inventory_oui_and_json_round_trip(tmp_path: Path, synthetic: Path) -> None:
     frames = [
         frame
@@ -340,6 +329,7 @@ RULE_SCENARIOS = {
 }
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("rule_id,scenario", sorted(RULE_SCENARIOS.items()))
 def test_each_rule_true_positive(
     rule_id: str,
@@ -352,6 +342,7 @@ def test_each_rule_true_positive(
     assert rule_id in {detection.rule_id for detection in detections}
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("rule_id", sorted(RULE_SCENARIOS))
 def test_each_rule_does_not_fire_on_benign(
     rule_id: str,
@@ -363,6 +354,7 @@ def test_each_rule_does_not_fire_on_benign(
     assert rule_id not in {detection.rule_id for detection in detections}
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("seed", [1, 2, 3, 42, 99])
 def test_seed_robustness(seed: int, tmp_path: Path) -> None:
     dataset = tmp_path / f"synthetic-{seed}"

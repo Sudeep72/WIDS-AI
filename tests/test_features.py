@@ -16,7 +16,6 @@ from wids_ai.features.extractors import (
 from wids_ai.features.windowing import WindowConfig
 from wids_ai.parser.dot11 import parse_frame
 from wids_ai.parser.models import Frame
-from wids_ai.synthetic.generator import generate_dataset
 
 BASE = datetime(2025, 1, 1, tzinfo=UTC)
 
@@ -58,10 +57,8 @@ def _frames(pcap) -> list[Frame]:
 
 
 @pytest.fixture(scope="session")
-def synthetic_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    out = tmp_path_factory.mktemp("feature-synthetic") / "synthetic"
-    generate_dataset(out, seed=42)
-    return out
+def synthetic_dir(synthetic_dataset) -> Path:
+    return synthetic_dataset(42)
 
 
 def test_feature_frame_has_stable_typed_columns() -> None:

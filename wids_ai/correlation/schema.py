@@ -28,9 +28,12 @@ class AttackMapping(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    tactic: str
-    technique: str
+    tactic: str | None = None
+    technique: str | None = None
     technique_name: str
+    matrix: str | None = None
+    verified: bool = False
+    verification_url: str | None = None
 
 
 class CorrelationReason(BaseModel):

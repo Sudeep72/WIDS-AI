@@ -27,7 +27,6 @@ from wids_ai.ml.isolation_forest import (
     score_rows,
     train_isolation_forest,
 )
-from wids_ai.synthetic.generator import generate_dataset
 
 BASE = datetime(2025, 1, 1, tzinfo=UTC)
 LABELS_NAME = "labels.json"
@@ -48,10 +47,8 @@ def _row(index: int, **updates: object) -> FeatureRow:
 
 
 @pytest.fixture(scope="session")
-def synthetic(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    out = tmp_path_factory.mktemp("ml-synthetic") / "synthetic"
-    generate_dataset(out, seed=42)
-    return out
+def synthetic(synthetic_dataset) -> Path:
+    return synthetic_dataset(42)
 
 
 @pytest.fixture(scope="session")
@@ -122,6 +119,7 @@ def test_score_mapping_is_bounded() -> None:
     assert normalized_score(-1.0) > normalized_score(1.0)
 
 
+@pytest.mark.slow
 def test_scope_models_and_aggregation_produce_scores(synthetic: Path) -> None:
     rows = load_benign_rows(synthetic / "benign_baseline.pcap")
     for scope in ("bssid", "client", "ssid"):
@@ -160,6 +158,7 @@ def test_training_code_does_not_read_labels(
     assert ATTACK_MARKER not in source
 
 
+@pytest.mark.slow
 def test_cli_score_writes_scores(
     tmp_path: Path, synthetic: Path, benign_rows: list[FeatureRow]
 ) -> None:
@@ -188,6 +187,7 @@ def test_cli_score_writes_scores(
     assert all(0.0 <= item["anomaly_score"] <= 1.0 for item in payload)
 
 
+@pytest.mark.slow
 def test_benign_alert_is_not_above_informational(trained, synthetic: Path, tmp_path: Path) -> None:
     from wids_ai.cli import main
 
