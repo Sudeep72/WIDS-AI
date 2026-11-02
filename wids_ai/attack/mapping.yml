@@ -1,4 +1,58 @@
-# Best-fit ATT&CK mappings are added with detection rules in milestone M7.
-# Verify every mapping at attack.mitre.org before operational use.
-families: {}
-rules: {}
+# Best-fit ATT&CK mappings. Verify every entry at attack.mitre.org before use.
+families:
+  # Best-fit mapping. Verify at attack.mitre.org.
+  evil_twin_rogue_ap:
+    tactic: "Initial Access"
+    technique: "T1557"
+    technique_name: "Adversary-in-the-Middle"
+  # Best-fit mapping. Verify at attack.mitre.org.
+  deauth_disassoc_anomaly:
+    tactic: "Impact"
+    technique: "T1464"
+    technique_name: "Network DoS"
+  # Best-fit mapping. Verify at attack.mitre.org.
+  probe_response_karma:
+    tactic: "Initial Access"
+    technique: "T1557"
+    technique_name: "Adversary-in-the-Middle"
+  # Best-fit mapping. Verify at attack.mitre.org.
+  beacon_management_anomaly:
+    tactic: "Impact"
+    technique: "T1464"
+    technique_name: "Network DoS"
+refs:
+  # Best-fit reference. Verify at attack.mitre.org.
+  evil_twin: evil_twin_rogue_ap
+  # Best-fit reference. Verify at attack.mitre.org.
+  deauth: deauth_disassoc_anomaly
+  # Best-fit reference. Verify at attack.mitre.org.
+  karma: probe_response_karma
+  # Best-fit reference. Verify at attack.mitre.org.
+  beacon_anomaly: beacon_management_anomaly
+rules:
+  # Best-fit mapping. Verify at attack.mitre.org.
+  WIDS-EVIL-001: evil_twin_rogue_ap
+  # Best-fit mapping. Verify at attack.mitre.org.
+  WIDS-EVIL-002: evil_twin_rogue_ap
+  # Best-fit mapping. Verify at attack.mitre.org.
+  WIDS-EVIL-003: evil_twin_rogue_ap
+  # Best-fit mapping. Verify at attack.mitre.org.
+  WIDS-EVIL-004: evil_twin_rogue_ap
+  # Best-fit mapping. Verify at attack.mitre.org.
+  WIDS-DEAUTH-001: deauth_disassoc_anomaly
+  # Best-fit mapping. Verify at attack.mitre.org.
+  WIDS-DEAUTH-002: deauth_disassoc_anomaly
+  # Best-fit mapping. Verify at attack.mitre.org.
+  WIDS-DEAUTH-003: deauth_disassoc_anomaly
+  # Best-fit mapping. Verify at attack.mitre.org.
+  WIDS-DEAUTH-004: deauth_disassoc_anomaly
+  # Best-fit mapping. Verify at attack.mitre.org.
+  WIDS-KARMA-001: probe_response_karma
+  # Best-fit mapping. Verify at attack.mitre.org.
+  WIDS-KARMA-002: probe_response_karma
+  # Best-fit mapping. Verify at attack.mitre.org.
+  WIDS-BEACON-001: beacon_management_anomaly
+  # Best-fit mapping. Verify at attack.mitre.org.
+  WIDS-BEACON-002: beacon_management_anomaly
+  # Best-fit mapping. Verify at attack.mitre.org.
+  WIDS-BEACON-003: beacon_management_anomaly

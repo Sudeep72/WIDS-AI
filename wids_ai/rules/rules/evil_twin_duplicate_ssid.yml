@@ -1,0 +1,19 @@
+id: WIDS-EVIL-001
+title: Duplicate SSID advertised by multiple BSSIDs
+family: evil_twin_rogue_ap
+description: A single SSID is advertised by more than one BSSID in the same window.
+severity: high
+scope: ssid
+conditions:
+  all:
+    - field: distinct_bssids
+      operator: ge
+      value: 2
+threshold: 2
+threshold_field: distinct_bssids
+window: 10
+cooldown: 30
+attack_ref: evil_twin
+false_positive_notes: >-
+  Legitimate roaming or mesh deployments can advertise one SSID from several
+  access points with the same OUI and coordinated channels.

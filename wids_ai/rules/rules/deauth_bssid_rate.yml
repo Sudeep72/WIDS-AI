@@ -1,0 +1,22 @@
+id: WIDS-DEAUTH-001
+title: High deauthentication rate from one BSSID
+family: deauth_disassoc_anomaly
+description: A BSSID emits deauthentication frames at an elevated per-second rate.
+severity: high
+scope: bssid
+conditions:
+  all:
+    - field: deauth_count
+      operator: ge
+      value: 6
+    - field: deauth_received_rate
+      operator: ge
+      value: 0.6
+threshold: 6
+threshold_field: deauth_count
+window: 10
+cooldown: 20
+attack_ref: deauth
+false_positive_notes: >-
+  AP reboots, client transitions, and scheduled network maintenance can produce
+  short deauthentication bursts.

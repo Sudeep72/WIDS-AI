@@ -1,0 +1,22 @@
+id: WIDS-EVIL-002
+title: SSID advertised by an untrusted OUI
+family: evil_twin_rogue_ap
+description: A BSSID advertising a known SSID has an OUI not present in the trusted inventory.
+severity: critical
+scope: ssid
+conditions:
+  all:
+    - field: unknown_bssid_count
+      operator: ge
+      value: 1
+    - field: oui_mismatch
+      operator: eq
+      value: 1
+threshold: 1
+threshold_field: unknown_bssid_count
+window: 10
+cooldown: 30
+attack_ref: evil_twin
+false_positive_notes: >-
+  New corporate hardware or a vendor OUI change can produce a mismatch until the
+  inventory is refreshed from a trusted baseline.

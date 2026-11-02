@@ -1,0 +1,25 @@
+id: WIDS-DEAUTH-004
+title: Deauthentication reason-code skew
+family: deauth_disassoc_anomaly
+description: One deauthentication reason code dominates an abnormal burst.
+severity: medium
+scope: bssid
+conditions:
+  all:
+    - field: deauth_count
+      operator: ge
+      value: 6
+    - field: deauth_reason_skew
+      operator: ge
+      value: 0.6
+    - field: deauth_reason_distinct
+      operator: ge
+      value: 2
+threshold: 6
+threshold_field: deauth_count
+window: 10
+cooldown: 20
+attack_ref: deauth
+false_positive_notes: >-
+  Legitimate client-initiated disconnects often use one reason code and can
+  exceed the rate during transitions.

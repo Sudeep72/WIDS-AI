@@ -112,6 +112,8 @@ def _group_keys(frame: Frame, scope: GroupScope) -> tuple[str, ...]:
     if scope == "bssid":
         return (frame.bssid,) if _is_unicast(frame.bssid) else ()
     if scope == "client":
+        if frame.subtype == "deauthentication":
+            return (frame.addr1,) if _is_unicast(frame.addr1) else ()
         return tuple(
             dict.fromkeys(address for address in (frame.addr1, frame.addr2) if _is_unicast(address))
         )

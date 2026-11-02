@@ -134,6 +134,7 @@ def _build_beacon(ap: AccessPoint, sequence: int, interval: int, rssi: int) -> o
             / _ssid(ap.ssid)
         )
         BEACON_TEMPLATES[key] = packet
+    packet = packet.copy()
     packet[Dot11].SC = (sequence & 0xFFF) << 4
     return packet
 

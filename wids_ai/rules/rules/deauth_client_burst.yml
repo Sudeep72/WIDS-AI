@@ -1,0 +1,19 @@
+id: WIDS-DEAUTH-003
+title: Per-client deauthentication burst
+family: deauth_disassoc_anomaly
+description: A client receives a high number of deauthentication frames.
+severity: high
+scope: client
+conditions:
+  all:
+    - field: deauth_count
+      operator: ge
+      value: 5
+threshold: 5
+threshold_field: deauth_count
+window: 10
+cooldown: 20
+attack_ref: deauth
+false_positive_notes: >-
+  Repeated association failures or a client repeatedly rejoining can create a
+  local burst.

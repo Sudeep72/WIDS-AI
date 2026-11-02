@@ -1,0 +1,22 @@
+id: WIDS-KARMA-001
+title: One BSSID answers probes for many SSIDs
+family: probe_response_karma
+description: A single BSSID sends probe responses for several unrelated SSIDs.
+severity: critical
+scope: bssid
+conditions:
+  all:
+    - field: distinct_ssids_answered
+      operator: ge
+      value: 3
+    - field: probe_response_count
+      operator: ge
+      value: 3
+threshold: 3
+threshold_field: distinct_ssids_answered
+window: 10
+cooldown: 30
+attack_ref: karma
+false_positive_notes: >-
+  Multi-SSID access points and test labs can legitimately answer several SSIDs,
+  but they usually advertise a stable and related SSID set.

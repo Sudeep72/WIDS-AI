@@ -134,6 +134,7 @@ def test_benign_timestamps_sequences_and_jitter_are_varied(
     frames = [frame for frame in parsed_frames["benign_baseline"] if frame.subtype == "beacon"]
     assert len({frame.timestamp for frame in frames}) > 100
     assert len({(frame.bssid, frame.seq_num) for frame in frames}) > 100
+    assert len({(frame.bssid, frame.seq_num) for frame in frames}) == len(frames)
     intervals = {frame.beacon_interval for frame in frames}
     assert len(intervals) > 1
     assert min(intervals) >= 990

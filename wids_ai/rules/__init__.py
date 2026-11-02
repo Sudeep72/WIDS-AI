@@ -1,1 +1,1 @@
-"""Rule engine and YAML detections."""
+"""YAML detection rules and evaluation."""

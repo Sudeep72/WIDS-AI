@@ -1,0 +1,19 @@
+id: WIDS-DEAUTH-002
+title: Broadcast deauthentication burst
+family: deauth_disassoc_anomaly
+description: Multiple deauthentication frames target the broadcast address.
+severity: critical
+scope: bssid
+conditions:
+  all:
+    - field: broadcast_deauth_count
+      operator: ge
+      value: 2
+threshold: 2
+threshold_field: broadcast_deauth_count
+window: 10
+cooldown: 20
+attack_ref: deauth
+false_positive_notes: >-
+  Rare AP-initiated network resets or vendor maintenance actions can broadcast
+  deauthentication frames.

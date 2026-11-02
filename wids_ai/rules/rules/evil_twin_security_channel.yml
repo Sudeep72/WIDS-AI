@@ -1,0 +1,25 @@
+id: WIDS-EVIL-003
+title: SSID security or channel mismatch
+family: evil_twin_rogue_ap
+description: A known SSID appears on a conflicting channel or security mode.
+severity: high
+scope: ssid
+conditions:
+  any:
+    - field: channel_mismatch
+      operator: eq
+      value: 1
+    - field: rsn_security_mismatch
+      operator: eq
+      value: 1
+    - field: rsn_mismatch
+      operator: eq
+      value: 1
+threshold: 1
+threshold_field: distinct_bssids
+window: 10
+cooldown: 30
+attack_ref: evil_twin
+false_positive_notes: >-
+  Intentional band steering, reconfiguration, or a security migration can create
+  channel and RSN differences during the change window.

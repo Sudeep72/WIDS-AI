@@ -1,0 +1,22 @@
+id: WIDS-EVIL-004
+title: SSID radio signal spread across BSSIDs
+family: evil_twin_rogue_ap
+description: BSSIDs advertising the same SSID show a large RSSI spread.
+severity: medium
+scope: ssid
+conditions:
+  all:
+    - field: distinct_bssids
+      operator: ge
+      value: 2
+    - field: rssi_spread
+      operator: ge
+      value: 40
+threshold: 40
+threshold_field: rssi_spread
+window: 10
+cooldown: 30
+attack_ref: evil_twin
+false_positive_notes: >-
+  Roaming clients and access points at different distances can naturally show a
+  wide RSSI spread.

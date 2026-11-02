@@ -1,0 +1,22 @@
+id: WIDS-BEACON-002
+title: Duplicate or backward beacon sequence numbers
+family: beacon_management_anomaly
+description: Beacon sequence behavior is inconsistent for one BSSID stream.
+severity: high
+scope: bssid
+conditions:
+  any:
+    - field: seq_duplicate_count
+      operator: ge
+      value: 2
+    - field: seq_gap_count
+      operator: ge
+      value: 3
+threshold: 2
+threshold_field: seq_duplicate_count
+window: 10
+cooldown: 30
+attack_ref: beacon_anomaly
+false_positive_notes: >-
+  Packet loss and retransmissions can create gaps, while some firmware reuses
+  sequence numbers during reset.

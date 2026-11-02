@@ -1,0 +1,22 @@
+id: WIDS-BEACON-003
+title: Elevated beacon interval jitter
+family: beacon_management_anomaly
+description: Beacon interval jitter is far above normal timing variation.
+severity: medium
+scope: bssid
+conditions:
+  all:
+    - field: beacon_interval_jitter
+      operator: ge
+      value: 20
+    - field: beacon_count
+      operator: ge
+      value: 3
+threshold: 20
+threshold_field: beacon_interval_jitter
+window: 10
+cooldown: 30
+attack_ref: beacon_anomaly
+false_positive_notes: >-
+  Channel changes, monitor-mode packet loss, and overlapping BSSIDs can create
+  apparent jitter in a short window.

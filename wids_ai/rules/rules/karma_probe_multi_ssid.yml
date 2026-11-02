@@ -1,0 +1,22 @@
+id: WIDS-KARMA-002
+title: Repeated probe responses across many SSIDs
+family: probe_response_karma
+description: A BSSID has a high count of probe responses with several SSIDs.
+severity: high
+scope: bssid
+conditions:
+  all:
+    - field: probe_response_count
+      operator: ge
+      value: 5
+    - field: distinct_ssids_answered
+      operator: ge
+      value: 5
+threshold: 5
+threshold_field: probe_response_count
+window: 10
+cooldown: 30
+attack_ref: karma
+false_positive_notes: >-
+  Captures near busy public hotspots can show several SSIDs from one physical
+  device.

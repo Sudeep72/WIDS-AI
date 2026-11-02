@@ -75,6 +75,16 @@ class FeatureRow(BaseModel):
     authentication_ratio: float = 0.0
     association_ratio: float = 0.0
     action_ratio: float = 0.0
+    broadcast_deauth_count: int = 0
+    deauth_reason_distinct: int = 0
+    deauth_reason_skew: float = 0.0
+    seq_backward_count: int = 0
+    observed_bssids: str = ""
+    observed_ssids: str = ""
+    observed_clients: str = ""
+    observed_beacon_channels: str = ""
+    observed_security_modes: str = ""
+    rssi_by_bssid: str = ""
 
     def to_series(self) -> pd.Series:
         return pd.Series(self.model_dump(), dtype=object)
@@ -109,25 +119,29 @@ def _interval_series(frames: Iterable[Frame]) -> list[float]:
     return values
 
 
-def _seq_stats(frames: Iterable[Frame]) -> tuple[int, int]:
+def _seq_stats(frames: Iterable[Frame]) -> tuple[int, int, int]:
     gaps = 0
     duplicates = 0
-    seen: set[tuple[str | None, int]] = set()
-    per_sender: dict[str | None, int] = {}
+    backward = 0
+    seen: set[tuple[str | None, int | None, int]] = set()
+    per_stream: dict[tuple[str | None, int | None], int] = {}
     for frame in sorted(frames, key=lambda item: item.timestamp):
         if frame.seq_num is None:
             continue
-        key = (frame.addr2, frame.seq_num)
+        stream = (frame.addr2, frame.channel)
+        key = (frame.addr2, frame.channel, frame.seq_num)
         if key in seen:
             duplicates += 1
         seen.add(key)
-        previous = per_sender.get(frame.addr2)
+        previous = per_stream.get(stream)
         if previous is not None:
             delta = (frame.seq_num - previous) % 4096
-            if delta not in {0, 1}:
+            if 1 < delta < 2048:
                 gaps += 1
-        per_sender[frame.addr2] = frame.seq_num
-    return gaps, duplicates
+            if frame.seq_num < previous and previous - frame.seq_num < 2048:
+                backward += 1
+        per_stream[stream] = frame.seq_num
+    return gaps, duplicates, backward
 
 
 def _oui(mac: str | None) -> str | None:
@@ -175,7 +189,7 @@ def extract_window_features(window: Window) -> FeatureRow:
     group = window.group or ""
     interval_values = _interval_series(frames)
     rssi = [float(frame.rssi) for frame in frames if frame.rssi is not None]
-    seq_gaps, seq_duplicates = _seq_stats(frames)
+    seq_gaps, seq_duplicates, seq_backward = _seq_stats(frames)
     ssids_answered = {
         frame.ssid for frame in frames if frame.subtype == "probe_response" and frame.ssid
     }
@@ -196,7 +210,46 @@ def extract_window_features(window: Window) -> FeatureRow:
             or (frame.addr2 == group and frame.addr1 in {"ff:ff:ff:ff:ff:ff", None})
         )
     )
+    beacon_frames = [frame for frame in frames if frame.subtype == "beacon"]
+    observed_bssids = sorted(bssids)
+    observed_ssids = sorted({frame.ssid for frame in frames if frame.ssid})
+    observed_clients = sorted(
+        {
+            address
+            for frame in frames
+            for address in (frame.addr1, frame.addr2)
+            if _is_unicast(address) and address not in bssids
+        }
+    )
+    beacon_channels = sorted(
+        {frame.channel for frame in beacon_frames if frame.channel is not None}
+    )
+    security_modes = sorted(
+        {frame.security for frame in frames if frame.subtype in {"beacon", "probe_response"}}
+    )
+    rssi_by_bssid: dict[str, list[float]] = {}
+    for frame in frames:
+        if frame.bssid and _is_unicast(frame.bssid) and frame.rssi is not None:
+            rssi_by_bssid.setdefault(frame.bssid, []).append(float(frame.rssi))
+    rssi_by_bssid_text = ";".join(
+        f"{bssid}={_mean(values):.3f}" for bssid, values in sorted(rssi_by_bssid.items())
+    )
+    deauth_count = (
+        deauth_received
+        if scope == "client"
+        else sum(1 for frame in frames if frame.subtype == "deauthentication")
+    )
     counters = Counter(frame.subtype for frame in frames)
+    deauth_reasons = Counter(
+        frame.reason_code
+        for frame in frames
+        if frame.subtype == "deauthentication" and frame.reason_code is not None
+    )
+    broadcast_deauths = sum(
+        1
+        for frame in frames
+        if frame.subtype == "deauthentication" and frame.addr1 == "ff:ff:ff:ff:ff:ff"
+    )
     total = len(frames)
     durations = window.duration_seconds or 1.0
     return FeatureRow(
@@ -215,7 +268,7 @@ def extract_window_features(window: Window) -> FeatureRow:
         seq_duplicate_count=seq_duplicates,
         probe_response_count=counters["probe_response"],
         distinct_ssids_answered=len(ssids_answered),
-        deauth_count=counters["deauthentication"],
+        deauth_count=deauth_count,
         disassoc_count=counters["disassociation"],
         rssi_mean=_mean(rssi),
         rssi_std=_std(rssi),
@@ -238,6 +291,18 @@ def extract_window_features(window: Window) -> FeatureRow:
             counters["association_request"] + counters["association_response"], total
         ),
         action_ratio=_ratio(counters["action"] + counters["action_no_ack"], total),
+        broadcast_deauth_count=broadcast_deauths,
+        deauth_reason_distinct=len(deauth_reasons),
+        deauth_reason_skew=(
+            max(deauth_reasons.values()) / sum(deauth_reasons.values()) if deauth_reasons else 0.0
+        ),
+        seq_backward_count=seq_backward,
+        observed_bssids=",".join(observed_bssids),
+        observed_ssids=",".join(observed_ssids),
+        observed_clients=",".join(observed_clients),
+        observed_beacon_channels=",".join(str(channel) for channel in beacon_channels),
+        observed_security_modes=",".join(security_modes),
+        rssi_by_bssid=rssi_by_bssid_text,
     )
 
 

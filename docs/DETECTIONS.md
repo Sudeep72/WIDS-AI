@@ -81,3 +81,66 @@ Broadcast and multicast addresses are excluded from BSSID and OUI counts.
 ```powershell
 .\.venv\Scripts\python.exe -m wids_ai.cli features data\synthetic\benign_baseline.pcap --out .tmp\features.csv
 ```
+## Rule catalog
+
+Rules are loaded from `wids_ai/rules/rules/*.yml`. Each document is one rule and
+uses pydantic validation. Attack mappings live only in
+`wids_ai/attack/mapping.yml`. The mappings below are best-fit ATT&CK mappings and
+must be verified at attack.mitre.org.
+
+### Evil twin and rogue AP
+
+- `WIDS-EVIL-001`: duplicate SSID with at least 2 distinct BSSIDs. Severity high.
+  False positives include legitimate roaming and mesh deployments.
+- `WIDS-EVIL-002`: unknown BSSID with an OUI mismatch against the inventory.
+  Severity critical. False positives include newly deployed hardware.
+- `WIDS-EVIL-003`: channel, security, or RSN mismatch for a known SSID. Severity
+  high. False positives include intentional band steering or a security migration.
+- `WIDS-EVIL-004`: RSSI spread of at least 40 dB across BSSIDs for one SSID.
+  Severity medium. False positives include APs at very different distances.
+
+### Deauthentication and disassociation
+
+- `WIDS-DEAUTH-001`: at least 6 deauth frames and 0.6 deauth frames per second
+  from one BSSID. Severity high. False positives include AP reboots.
+- `WIDS-DEAUTH-002`: at least 2 broadcast deauth frames. Severity critical.
+  False positives include rare network-wide resets.
+- `WIDS-DEAUTH-003`: a client receives at least 5 deauth frames. Severity high.
+  False positives include repeated association failures.
+- `WIDS-DEAUTH-004`: at least 6 deauth frames with a dominant reason code and at
+  least 2 reason codes. Severity medium. False positives include normal client
+  disconnect patterns.
+
+### Probe response and KARMA style
+
+- `WIDS-KARMA-001`: one BSSID answers probe requests for at least 3 distinct
+  SSIDs. Severity critical. False positives include multi-SSID access points.
+- `WIDS-KARMA-002`: at least 5 probe responses and 5 distinct answered SSIDs from
+  one BSSID. Severity high. False positives include busy public hotspots.
+
+### Beacon and management behavior
+
+- `WIDS-BEACON-001`: beacon interval standard deviation of at least 50 ms with at
+  least 3 beacons. Severity high. False positives include packet loss.
+- `WIDS-BEACON-002`: at least 2 duplicate sequence numbers or 3 sequence gaps.
+  Severity high. False positives include retransmissions and firmware resets.
+- `WIDS-BEACON-003`: beacon interval jitter of at least 20 ms with at least
+  3 beacons. Severity medium. False positives include channel changes and packet
+  loss in short windows.
+
+## Deduplication
+
+Rule hits with the same rule and entity identities are merged when overlapping or
+within the configured merge gap. The incident keeps the first and last window
+bounds, a hit count, merged evidence, maximum confidence, and the rule false
+positive notes.
+
+## Baseline inventory and CLI
+
+```powershell
+.\.venv\Scripts\python.exe -m wids_ai.cli baseline data\synthetic\benign_baseline.pcap --out .tmp\inventory.json
+.\.venv\Scripts\python.exe -m wids_ai.cli analyze data\synthetic\mixed_deauth_burst.pcap --inventory .tmp\inventory.json --rules wids_ai\rules\rules --out .tmp\detections.json
+```
+
+The inventory is in-memory and JSON-backed. Trust scores start at 90 and are
+clamped to the 0 to 100 range when rules adjust them.

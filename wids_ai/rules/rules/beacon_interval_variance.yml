@@ -1,0 +1,22 @@
+id: WIDS-BEACON-001
+title: Abnormal beacon interval variance
+family: beacon_management_anomaly
+description: Beacon interval readings vary far beyond normal jitter.
+severity: high
+scope: bssid
+conditions:
+  all:
+    - field: beacon_interval_std
+      operator: ge
+      value: 50
+    - field: beacon_count
+      operator: ge
+      value: 3
+threshold: 50
+threshold_field: beacon_interval_std
+window: 10
+cooldown: 30
+attack_ref: beacon_anomaly
+false_positive_notes: >-
+  Channel changes, monitor-mode packet loss, and overlapping BSSIDs can create
+  apparent interval variance.

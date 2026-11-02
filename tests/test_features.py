@@ -155,7 +155,7 @@ def test_client_deauth_received_is_attributed_to_receiver() -> None:
         for index in range(10)
     ]
     result = extract_features(frames, WindowConfig(10, 10, "tumbling"), scopes=("client",))
-    assert {client, "00:11:22:33:44:55"} <= set(result["group"])
+    assert set(result["group"]) == {client}
     receiver_row = result.loc[result["group"] == client].iloc[0]
     assert receiver_row["deauth_count"] == 10
     assert receiver_row["deauth_received_rate"] == 1.0
