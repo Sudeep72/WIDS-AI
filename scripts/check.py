@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+TMP_ROOT = ROOT / ".tmp"
 
 
 def run(*args: str) -> None:
@@ -15,10 +17,11 @@ def run(*args: str) -> None:
 
 
 def main() -> int:
-    (ROOT / ".tmp").mkdir(exist_ok=True)
+    TMP_ROOT.mkdir(exist_ok=True)
+    basetemp = TMP_ROOT / f"pytest-{time.time_ns()}"
     run(sys.executable, "-m", "ruff", "check", ".")
     run(sys.executable, "-m", "ruff", "format", "--check", ".")
-    run(sys.executable, "-m", "pytest")
+    run(sys.executable, "-m", "pytest", f"--basetemp={basetemp}")
     return 0
 
 

@@ -34,7 +34,15 @@ CLI entry point, and test and lint checks.
 Expected result is a clean Ruff run and all tests passing. The scaffold has no
 wireless transmission code. Live capture is refused on non-Linux systems.
 
-## Safety boundary
+## Python compatibility
 
+The project requires Python 3.11 or newer. The pinned runtime and development
+requirements resolve on CPython 3.11, 3.12, 3.13, and 3.14. Linux wheels were
+validated against the manylinux 2.17 and 2.28 x86_64 targets, and Windows wheels
+were validated for the local runtime. NumPy 2.3.5, SciPy 1.17.1, and pandas 2.3.3
+are the common pins that preserve Python 3.11 support without version-specific
+requirements files.
+
+## Safety boundary
 This project is defensive only. It does not contain frame injection, deauthentication
 sending, or any transmit function. Synthetic fixtures are written to PCAP files only.
