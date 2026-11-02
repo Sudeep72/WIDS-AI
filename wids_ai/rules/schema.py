@@ -86,6 +86,7 @@ class Evidence(BaseModel):
     observed: Any
     threshold: Any
     text: str
+    rule_ids: tuple[str, ...] = ()
 
 
 class Detection(BaseModel):
@@ -107,6 +108,7 @@ class Detection(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     attack_ref: str
     false_positive_notes: str
+    not_fired_evidence: tuple[Evidence, ...] = ()
 
 
 class Incident(BaseModel):
@@ -129,3 +131,4 @@ class Incident(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     attack_ref: str
     false_positive_notes: str
+    not_fired_evidence: tuple[Evidence, ...] = ()

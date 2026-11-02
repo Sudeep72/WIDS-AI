@@ -44,6 +44,7 @@ DDL = (
         trust_score INTEGER NOT NULL DEFAULT 0,
         flagged INTEGER NOT NULL DEFAULT 0,
         flag_reason TEXT,
+        status TEXT NOT NULL DEFAULT 'Trusted',
         updated_at TEXT NOT NULL
     )
     """,
@@ -163,6 +164,10 @@ class Database:
                 }
                 if "flag_reason" not in columns:
                     connection.execute("ALTER TABLE aps ADD COLUMN flag_reason TEXT")
+                if "status" not in columns:
+                    connection.execute(
+                        "ALTER TABLE aps ADD COLUMN status TEXT NOT NULL DEFAULT 'Trusted'"
+                    )
                 connection.execute(
                     "INSERT OR REPLACE INTO schema_version(version, applied_at) VALUES (?, ?)",
                     (SCHEMA_VERSION, datetime.now(tz=UTC).isoformat()),
@@ -192,13 +197,21 @@ class Database:
     ) -> None:
         flagged = flagged or set()
         flag_reasons = flag_reasons or {}
+        statuses = {
+            bssid: (
+                "Flagged"
+                if bssid in flagged
+                else ("Watch" if flag_reasons.get(bssid) else "Trusted")
+            )
+            for bssid in inventory.aps
+        }
         now = datetime.now(tz=UTC).isoformat()
         with self.transaction() as connection:
             for bssid, ap in inventory.aps.items():
                 connection.execute(
                     """
-                    INSERT INTO aps(bssid, ssid, oui, channels, rssi, security, trust_score, flagged, flag_reason, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO aps(bssid, ssid, oui, channels, rssi, security, trust_score, flagged, flag_reason, status, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(bssid) DO UPDATE SET
                         ssid = excluded.ssid,
                         oui = excluded.oui,
@@ -208,6 +221,7 @@ class Database:
                         trust_score = excluded.trust_score,
                         flagged = excluded.flagged,
                         flag_reason = excluded.flag_reason,
+                        status = excluded.status,
                         updated_at = excluded.updated_at
                     """,
                     (
@@ -220,6 +234,7 @@ class Database:
                         ap.trust_score,
                         1 if bssid in flagged else 0,
                         flag_reasons.get(bssid),
+                        statuses[bssid],
                         now,
                     ),
                 )
@@ -367,7 +382,7 @@ class Database:
         rows = (
             self.connection()
             .execute(
-                "SELECT bssid, ssid, oui, channels, rssi, security, trust_score, flagged, flag_reason FROM aps ORDER BY bssid"
+                "SELECT bssid, ssid, oui, channels, rssi, security, trust_score, flagged, flag_reason, status FROM aps ORDER BY bssid"
             )
             .fetchall()
         )
@@ -382,6 +397,7 @@ class Database:
                 "trust_score": row["trust_score"],
                 "flagged": bool(row["flagged"]),
                 "flag_reason": row["flag_reason"],
+                "status": row["status"],
             }
             for row in rows
         ]

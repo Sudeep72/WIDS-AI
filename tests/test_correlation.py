@@ -115,7 +115,7 @@ def test_explanation_uses_only_evidence_fields() -> None:
     alert = score_group([_incident()], 0.2, _inventory())
     assert alert.why
     assert alert.indicators_found
-    assert alert.indicators_not_found
+    assert alert.indicators_not_found == []
     assert "distinct_bssids" in alert.why
     assert "not a standalone verdict" in alert.why
 
@@ -125,3 +125,44 @@ def test_ml_only_alert_in_correlate() -> None:
     assert len(alerts) == 1
     assert alerts[0].informational
     assert alerts[0].risk_score <= 10
+
+
+def test_alert_evidence_is_deduplicated_with_rule_ids() -> None:
+    first = _incident(rule_id="WIDS-EVIL-001")
+    second = _incident(rule_id="WIDS-EVIL-002")
+    alert = score_group(
+        [first, second],
+        0.2,
+        _inventory(),
+    )
+    fields = [item.field for item in alert.evidence]
+    assert len(fields) == len(set(fields))
+    assert set(alert.evidence[0].rule_ids) == {"WIDS-EVIL-001", "WIDS-EVIL-002"}
+
+
+def test_not_fired_indicators_are_evaluated_fields_only() -> None:
+    incident = _incident()
+    alert = score_group([incident], 0.2, _inventory())
+    assert all(item.observed != "not established" for item in alert.indicators_not_found)
+    assert alert.indicators_not_found == []
+
+
+def test_not_fired_indicators_use_evaluated_values() -> None:
+    incident = _incident().model_copy(
+        update={
+            "not_fired_evidence": (
+                Evidence(
+                    field="channel_mismatch",
+                    observed=0,
+                    threshold=1,
+                    text="channel_mismatch was 0, expected eq 1",
+                    rule_ids=("WIDS-EVIL-003",),
+                ),
+            )
+        }
+    )
+    alert = score_group([incident], 0.2, _inventory())
+    assert alert.indicators_not_found
+    assert alert.indicators_not_found[0].field == "channel_mismatch"
+    assert alert.indicators_not_found[0].observed == "0"
+    assert alert.indicators_not_found[0].expected == "1"

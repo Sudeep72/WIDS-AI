@@ -13,7 +13,7 @@ from wids_ai.attack.mapper import map_family
 from wids_ai.correlation.explain import build_explanation
 from wids_ai.correlation.schema import Alert, CorrelationReason
 from wids_ai.inventory import APInventory
-from wids_ai.rules.schema import Incident
+from wids_ai.rules.schema import Evidence, Incident
 
 
 class CorrelationConfig(BaseModel):
@@ -44,6 +44,18 @@ class CorrelationConfig(BaseModel):
 
 def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
     return max(low, min(high, value))
+
+
+def _merge_evidence(evidence: Iterable[Evidence]) -> list[Evidence]:
+    merged: dict[str, Evidence] = {}
+    rule_ids: dict[str, set[str]] = {}
+    for item in evidence:
+        rule_ids.setdefault(item.field, set()).update(item.rule_ids)
+        merged.setdefault(item.field, item)
+    return [
+        merged[field].model_copy(update={"rule_ids": tuple(sorted(rule_ids[field]))})
+        for field in sorted(merged)
+    ]
 
 
 def _entity_key(incident: Incident) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
@@ -102,7 +114,11 @@ def score_group(
 ) -> Alert:
     """Turn one incident group into a risk-scored alert."""
     config = config or CorrelationConfig()
-    rule_evidence = [item for incident in incidents for item in incident.evidence]
+    rule_evidence = _merge_evidence(
+        item.model_copy(update={"rule_ids": tuple(sorted({*item.rule_ids, incident.rule_id}))})
+        for incident in incidents
+        for item in incident.evidence
+    )
     bssids, ssids, clients = _merge_entities(incidents)
     families = {incident.family for incident in incidents}
     families.discard("")
@@ -188,9 +204,13 @@ def score_group(
     first = min(item.first_seen for item in incidents) if incidents else datetime.now().astimezone()
     last = max(item.last_seen for item in incidents) if incidents else first
     primary_family = sorted(families)[0] if families else "ml_anomaly"
+    not_fired = _merge_evidence(
+        item for incident in incidents for item in incident.not_fired_evidence
+    )
     why, found, missing, recommended = build_explanation(
         primary_family,
         rule_evidence,
+        not_fired,
         bssids,
         ssids,
         clients,

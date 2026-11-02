@@ -179,3 +179,25 @@ Verified against attack.mitre.org on 2026-11-02:
 
 These are best-fit mappings, not certainty claims. Verify before publishing or using
 operationally.
+
+## Correlated alert evidence
+
+Alert evidence is merged by field in the correlation layer. Each merged item lists
+the rule IDs that produced it. The explanation is built from that deduplicated
+evidence, so a field appears once even when several evil-twin rules observe it.
+
+`indicators_not_found` contains only conditions that were actually evaluated and
+did not fire, with their observed and expected values. Placeholder indicators are
+not emitted. If no additional condition was evaluated, the list is empty.
+
+The API returns complete evidence and explanation text. The dashboard applies
+sentence-boundary truncation only for display.
+
+## AP status semantics
+
+- Unknown BSSIDs are `Flagged` with reason `not in trusted inventory` and trust 0
+  after evidence-based replay adjustment.
+- Trusted APs that share an SSID with an unknown BSSID are `Watch` with reason
+  `SSID shared with untrusted AP`. Their trust remains unchanged unless separate
+  evidence justifies a reduction.
+- Trusted APs with no such evidence are `Trusted`.

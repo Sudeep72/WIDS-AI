@@ -214,6 +214,37 @@ def _frame_values(
     return values
 
 
+def _not_fired_evidence(
+    condition: Condition,
+    values: Mapping[str, Any],
+) -> list[Evidence]:
+    evidence: list[Evidence] = []
+    if condition.all is not None:
+        for item in condition.all:
+            if not _condition_matches(item, values):
+                evidence.extend(_not_fired_evidence(item, values))
+        return evidence
+    if condition.any is not None:
+        matched = [item for item in condition.any if _condition_matches(item, values)]
+        if not matched:
+            for item in condition.any:
+                evidence.extend(_not_fired_evidence(item, values))
+        return evidence
+    if condition.field is None or condition.operator is None:
+        return evidence
+    observed = values.get(condition.field)
+    if _compare(condition.operator, observed, condition.value):
+        return evidence
+    return [
+        Evidence(
+            field=condition.field,
+            observed=observed,
+            threshold=condition.value,
+            text=f"{condition.field} was {observed!r}, expected {condition.operator} {condition.value!r}",
+        )
+    ]
+
+
 def _evidence_for(
     condition: Condition,
     values: Mapping[str, Any],
@@ -296,10 +327,14 @@ def evaluate_rule(
         bssids=bssids,
         ssids=ssids,
         clients=clients,
-        evidence=tuple(evidence),
+        evidence=tuple(item.model_copy(update={"rule_ids": (rule.id,)}) for item in evidence),
         confidence=SEVERITY_CONFIDENCE[rule.severity],
         attack_ref=rule.attack_ref,
         false_positive_notes=rule.false_positive_notes,
+        not_fired_evidence=tuple(
+            item.model_copy(update={"rule_ids": (rule.id,)})
+            for item in _not_fired_evidence(rule.conditions, values)
+        ),
     )
 
 

@@ -120,8 +120,7 @@ def replay_pcap(
             flag_reasons[bssid] = "not in trusted inventory"
             inventory.adjust_trust(bssid, -10)
         elif duplicate:
-            flagged.add(bssid)
-            flag_reasons[bssid] = "duplicate SSID"
+            flag_reasons[bssid] = "SSID shared with untrusted AP"
     run_id = database.start_run(str(source))
     database.save_inventory(inventory, flagged, flag_reasons)
     if sleep and speed > 0:

@@ -9,12 +9,13 @@ from wids_ai.rules.schema import Evidence
 def build_explanation(
     family: str,
     evidence: list[Evidence],
+    not_fired_evidence: list[Evidence],
     bssids: tuple[str, ...],
     ssids: tuple[str, ...],
     clients: tuple[str, ...],
     ml_score: float,
 ) -> tuple[str, list[Indicator], list[Indicator], str]:
-    """Build a plain-English explanation strictly from supplied evidence."""
+    """Build an explanation from deduplicated evaluated evidence only."""
     found = [
         Indicator(
             field=item.field,
@@ -24,22 +25,15 @@ def build_explanation(
         )
         for item in evidence
     ]
-    expected_checks = {
-        "evil_twin_rogue_ap": ("inventory_match", "channel_match", "rsn_match"),
-        "deauth_disassoc_anomaly": ("normal_deauth_rate", "unicast_only"),
-        "probe_response_karma": ("single_ssid_response", "stable_oui"),
-        "beacon_management_anomaly": ("stable_interval", "monotonic_sequence"),
-    }
-    found_fields = {item.field for item in evidence}
     not_found = [
         Indicator(
-            field=field,
-            observed="not established",
-            expected="expected baseline",
-            meaning="This indicator was not established by the rule evidence.",
+            field=item.field,
+            observed=str(item.observed),
+            expected=str(item.threshold),
+            meaning=item.text,
         )
-        for field in expected_checks.get(family, ())
-        if field not in found_fields
+        for item in not_fired_evidence
+        if item.field not in {found_item.field for found_item in found}
     ]
     entities = []
     if bssids:

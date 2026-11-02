@@ -25,8 +25,7 @@ def sanitize_text(value: Any) -> Any:
     """Remove control characters and truncate attacker-controlled display text."""
     if not isinstance(value, str):
         return value
-    cleaned = CONTROL_CHARS.sub("", unicodedata.normalize("NFC", value))
-    return cleaned[:MAX_TEXT]
+    return CONTROL_CHARS.sub("", unicodedata.normalize("NFC", value))
 
 
 def sanitize_payload(value: Any) -> Any:
@@ -61,6 +60,7 @@ class APResponse(BaseModel):
     trust_score: int
     flagged: bool
     flag_reason: str | None = None
+    status: str = "Trusted"
 
 
 class AlertResponse(BaseModel):

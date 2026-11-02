@@ -39,7 +39,6 @@ class KnownAP(BaseModel):
     first_seen: datetime | None = None
     last_seen: datetime | None = None
 
-    @property
     @field_validator("security", mode="before")
     @classmethod
     def normalize_security(cls, value: object) -> str:
