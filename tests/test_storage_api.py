@@ -254,3 +254,30 @@ def test_ap_security_is_single_mode_and_rssi_rounded(tmp_path: Path) -> None:
     ap = db.list_aps()[0]
     assert ap["security"] == "open"
     assert ap["rssi"] == -42.1
+
+
+def test_legacy_security_list_is_read_as_single_mode(tmp_path: Path) -> None:
+    db = Database(tmp_path / "legacy.db")
+    with sqlite3.connect(tmp_path / "legacy.db") as connection:
+        connection.execute(
+            """
+            INSERT INTO aps(bssid, ssid, oui, channels, rssi, security, trust_score, flagged, flag_reason, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "00:aa:bb:cc:dd:ee",
+                "LegacyNet",
+                "00:aa:bb",
+                "[]",
+                -40.04,
+                '["open", "wep"]',
+                80,
+                0,
+                None,
+                "2025-01-01T00:00:00+00:00",
+            ),
+        )
+        connection.commit()
+    row = db.list_aps()[0]
+    assert row["security"] == "wep"
+    assert row["rssi"] == -40.0
