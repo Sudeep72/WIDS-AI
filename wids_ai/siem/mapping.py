@@ -161,6 +161,9 @@ def alert_to_event(
 ) -> NormalizedEvent:
     """Map one correlated alert to a NanoSIEM NormalizedEvent."""
     exported = alert.model_dump(mode="json")
+    # Keep one evidence copy in raw. The API model still exposes all contract fields.
+    for duplicate in ("rule_evidence", "indicators_found"):
+        exported.pop(duplicate, None)
     sanitized = clean_value(exported)
     raw = _bounded_raw(sanitized)
     first_seen = alert.first_seen or alert.timestamp

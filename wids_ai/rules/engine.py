@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 from bisect import bisect_left
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Iterable, Mapping
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -110,6 +111,15 @@ def _compare(operator: str, observed: Any, expected: Any) -> bool:
     return False
 
 
+def _has_any_group(condition: Condition) -> bool:
+    if condition.any is not None:
+        return True
+    for child in condition.all or ():
+        if _has_any_group(child):
+            return True
+    return any(_has_any_group(child) for child in condition.any or ())
+
+
 def _condition_matches(condition: Condition, values: Mapping[str, Any]) -> bool:
     if condition.all is not None:
         return all(_condition_matches(item, values) for item in condition.all)
@@ -180,8 +190,24 @@ def _frame_values(
         for frame in selected
         if frame.subtype == "deauthentication" and frame.reason_code is not None
     )
+    seq_duplicate_count = row.seq_duplicate_count
+    seq_gap_count = row.seq_gap_count
+    beacon_interval_std = row.beacon_interval_std
+    beacon_interval_jitter = row.beacon_interval_jitter
+    # A trusted AP can legitimately reset its sequence counter after a restart.
+    # A gap alone is not evidence when no duplicate stream and no other beacon
+    # timing anomaly is present in the same window.
+    trusted_reset_gap = int(
+        row.scope == "bssid"
+        and inventory.is_known(row.group)
+        and seq_gap_count >= 2
+        and seq_duplicate_count == 0
+        and beacon_interval_std < 50.0
+        and beacon_interval_jitter < 20.0
+    )
     values.update(
         {
+            "trusted_sequence_reset_gap": trusted_reset_gap,
             "known_bssid_count": len(known),
             "unknown_bssid_count": len(unknown),
             "inventory_bssid_count": len(inventory.bssids_for_ssid(row.group))
@@ -313,7 +339,7 @@ def evaluate_rule(
         return None
     threshold_field = rule.threshold_field or rule.conditions.field or "frame_count"
     threshold_value = values.get(threshold_field, 0.0)
-    composite = rule.conditions.any is not None and len(rule.conditions.any) > 1
+    composite = _has_any_group(rule.conditions)
     if not composite and (threshold_value is None or float(threshold_value) < rule.threshold):
         return None
     evidence = _evidence_for(rule.conditions, values, rule.threshold)
@@ -340,6 +366,90 @@ def evaluate_rule(
     )
 
 
+def _rolling_entities(rule: RuleDefinition, frames: list[Frame]) -> dict[str, list[Frame]]:
+    """Collect deauth events per BSSID transmitter or receiving client."""
+    grouped: dict[str, list[Frame]] = {}
+    for frame in frames:
+        if frame.subtype != "deauthentication":
+            continue
+        if rule.scope == "bssid" and frame.bssid:
+            grouped.setdefault(frame.bssid, []).append(frame)
+        elif rule.scope == "client" and frame.addr1 and frame.addr1 != "ff:ff:ff:ff:ff:ff":
+            grouped.setdefault(frame.addr1, []).append(frame)
+    return grouped
+
+
+def _evaluate_rolling_rule(
+    rule: RuleDefinition,
+    frames: list[Frame],
+    inventory: APInventory,
+) -> list[Detection]:
+    """Evaluate cumulative deauth activity over a trailing time window."""
+    detections: list[Detection] = []
+    window = timedelta(seconds=rule.window)
+    for entity, events in _rolling_entities(rule, frames).items():
+        ordered = sorted(events, key=lambda frame: frame.timestamp)
+        if not ordered:
+            continue
+        active: deque[Frame] = deque()
+        triggered = False
+        for event in ordered:
+            active.append(event)
+            while active and event.timestamp - active[0].timestamp > window:
+                active.popleft()
+            count = len(active)
+            if triggered or count < rule.threshold:
+                continue
+            triggered = True
+            first = active[0]
+            if rule.scope == "client":
+                bssids = tuple(sorted({frame.bssid for frame in active if frame.bssid}))
+                clients = (entity,)
+                ssids: tuple[str, ...] = ()
+            else:
+                bssids = (entity,)
+                clients = tuple(
+                    sorted(
+                        {
+                            frame.addr1
+                            for frame in active
+                            if frame.addr1 and frame.addr1 != "ff:ff:ff:ff:ff:ff"
+                        }
+                    )
+                )
+                ssids = ()
+            evidence = Evidence(
+                field="deauth_count",
+                observed=count,
+                threshold=rule.threshold,
+                operator="ge",
+                text=(
+                    f"cumulative deauth_count was {count} over {rule.window} seconds, "
+                    f"expected ge {rule.threshold:g}"
+                ),
+                rule_ids=(rule.id,),
+            )
+            detections.append(
+                Detection(
+                    rule_id=rule.id,
+                    family=rule.family,
+                    severity=rule.severity,
+                    title=rule.title,
+                    scope=rule.scope,
+                    window_start=first.timestamp,
+                    window_end=event.timestamp,
+                    bssids=bssids,
+                    ssids=ssids,
+                    clients=clients,
+                    evidence=(evidence,),
+                    confidence=SEVERITY_CONFIDENCE[rule.severity],
+                    attack_ref=rule.attack_ref,
+                    false_positive_notes=rule.false_positive_notes,
+                )
+            )
+    return detections
+
+
 def evaluate_rules(
     rows: Iterable[FeatureRow],
     rules: Iterable[RuleDefinition],
@@ -358,7 +468,8 @@ def evaluate_rules(
     detections: list[Detection] = []
     rules_by_scope: dict[str, list[RuleDefinition]] = {}
     for rule in rule_list:
-        rules_by_scope.setdefault(rule.scope, []).append(rule)
+        if rule.aggregation == "window":
+            rules_by_scope.setdefault(rule.scope, []).append(rule)
     for row in rows:
         scope_rules = rules_by_scope.get(row.scope, [])
         if not scope_rules:
@@ -370,6 +481,9 @@ def evaluate_rules(
             detection = evaluate_rule(rule, row, window_frames, inventory)
             if detection is not None:
                 detections.append(detection)
+    for rule in rule_list:
+        if rule.aggregation == "rolling":
+            detections.extend(_evaluate_rolling_rule(rule, frame_list, inventory))
 
     return detections
 

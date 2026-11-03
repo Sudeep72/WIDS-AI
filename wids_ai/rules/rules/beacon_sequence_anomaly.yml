@@ -5,15 +5,19 @@ description: Beacon sequence behavior is inconsistent for one BSSID stream.
 severity: high
 scope: bssid
 conditions:
-  any:
-    - field: seq_duplicate_count
-      operator: ge
-      value: 2
-    - field: seq_gap_count
-      operator: ge
-      value: 2
-threshold: 2
-threshold_field: seq_duplicate_count
+  all:
+    - any:
+        - field: seq_duplicate_count
+          operator: ge
+          value: 2
+        - field: seq_gap_count
+          operator: ge
+          value: 2
+    - field: trusted_sequence_reset_gap
+      operator: eq
+      value: 0
+threshold: 0
+threshold_field: frame_count
 window: 10
 cooldown: 30
 attack_ref: beacon_anomaly

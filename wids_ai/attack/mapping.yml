@@ -53,6 +53,8 @@ rules:
   WIDS-DEAUTH-002: deauth_disassoc_anomaly
   WIDS-DEAUTH-003: deauth_disassoc_anomaly
   WIDS-DEAUTH-004: deauth_disassoc_anomaly
+  WIDS-DEAUTH-005: deauth_disassoc_anomaly
+  WIDS-DEAUTH-006: deauth_disassoc_anomaly
   # Verified Enterprise mapping. Verify at attack.mitre.org before publishing.
   WIDS-KARMA-001: probe_response_karma
   WIDS-KARMA-002: probe_response_karma

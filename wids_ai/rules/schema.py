@@ -67,6 +67,7 @@ class RuleDefinition(BaseModel):
     cooldown: int = Field(ge=0)
     attack_ref: str
     false_positive_notes: str
+    aggregation: Literal["window", "rolling"] = "window"
 
     @model_validator(mode="after")
     def validate_identity(self) -> RuleDefinition:

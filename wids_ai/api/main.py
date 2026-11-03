@@ -49,6 +49,9 @@ class StatsResponse(BaseModel):
     latest_ml_scores: list[dict[str, Any]]
     run_id: int | None = None
     run_started_at: str | None = None
+    frames_per_second: float = 0.0
+    parse_errors: int = 0
+    dropped: int = 0
 
 
 class APResponse(BaseModel):

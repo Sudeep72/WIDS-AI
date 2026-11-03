@@ -1,0 +1,19 @@
+id: WIDS-DEAUTH-006
+title: Cumulative deauthentication to one client
+family: deauth_disassoc_anomaly
+description: A client receives sustained deauthentication frames across a five-minute window.
+severity: high
+scope: client
+aggregation: rolling
+conditions:
+  all:
+    - field: deauth_count
+      operator: ge
+      value: 6
+threshold: 6
+threshold_field: deauth_count
+window: 300
+cooldown: 300
+attack_ref: deauth
+false_positive_notes: >-
+  Benign baseline and noisy benign have zero deauth frames. Repeated reconnect attempts can still create this pattern.

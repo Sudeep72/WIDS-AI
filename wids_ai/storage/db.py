@@ -14,7 +14,7 @@ from typing import Any
 from wids_ai.correlation.schema import Alert
 from wids_ai.inventory import APInventory
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DDL = (
     """
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -92,6 +92,15 @@ DDL = (
     CREATE TABLE IF NOT EXISTS exported_states (
         event_key TEXT PRIMARY KEY,
         exported_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS capture_stats (
+        run_id INTEGER PRIMARY KEY,
+        frames_per_second REAL NOT NULL DEFAULT 0,
+        parse_errors INTEGER NOT NULL DEFAULT 0,
+        dropped INTEGER NOT NULL DEFAULT 0,
+        recorded_at TEXT NOT NULL
     )
     """,
     """
@@ -303,6 +312,30 @@ class Database:
                 (event_key, datetime.now(tz=UTC).isoformat()),
             )
 
+    def record_capture_stats(
+        self,
+        run_id: int,
+        *,
+        frames_per_second: float,
+        parse_errors: int,
+        dropped: int,
+    ) -> None:
+        with self.transaction() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO capture_stats(
+                    run_id, frames_per_second, parse_errors, dropped, recorded_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    float(frames_per_second),
+                    int(parse_errors),
+                    int(dropped),
+                    datetime.now(tz=UTC).isoformat(),
+                ),
+            )
+
     def save_ml_scores(self, run_id: int, scores: list[dict[str, Any]]) -> None:
         with self.transaction() as connection:
             connection.executemany(
@@ -401,6 +434,13 @@ class Database:
                 "SELECT window_start, score FROM ml_scores WHERE run_id = ? ORDER BY window_start",
                 (run_id,),
             ).fetchall()
+        capture = None
+        if run_id is not None and run != "all":
+            capture = connection.execute(
+                "SELECT frames_per_second, parse_errors, dropped "
+                "FROM capture_stats WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
         ml_points = [
             {"timestamp": row["window_start"], "score": float(row["score"] or 0.0)}
             for row in ml_rows
@@ -416,6 +456,9 @@ class Database:
             "latest_ml_scores": ml_points,
             "run_id": run_id,
             "run_started_at": latest["started_at"] if latest and run != "all" else None,
+            "frames_per_second": float(capture["frames_per_second"]) if capture else 0.0,
+            "parse_errors": int(capture["parse_errors"]) if capture else 0,
+            "dropped": int(capture["dropped"]) if capture else 0,
         }
 
     def list_alerts(
