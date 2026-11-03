@@ -123,3 +123,12 @@ def test_cli_baseline_and_analyze(tmp_path: Path) -> None:
     )
     assert output.is_file()
     assert output.read_text(encoding="utf-8").strip() == "[]"
+
+
+def test_live_help_exposes_capture_and_serve_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(["live", "--help"])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    for flag in ("--write-pcap", "--db", "--serve", "--hop-channels", "--siem-file"):
+        assert flag in output

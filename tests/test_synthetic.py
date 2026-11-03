@@ -12,6 +12,8 @@ from wids_ai.parser.dot11 import parse_frame
 from wids_ai.parser.models import Frame
 from wids_ai.synthetic.generator import generate_dataset
 
+pytestmark = pytest.mark.slow
+
 
 def _generate(tmp_path: Path, seed: int = 42) -> tuple[Path, dict[str, dict[str, object]]]:
     out = tmp_path / "synthetic"

@@ -62,6 +62,18 @@ def test_runtime_pins_support_python_versions(project_root: Path, python_version
         )
 
 
+@pytest.mark.parametrize("python_version", ["3.11", "3.12", "3.13", "3.14"])
+def test_development_pins_support_python_versions(project_root: Path, python_version: str) -> None:
+    pins = _requirements(project_root / "requirements-dev.txt")
+    for name in ("pytest", "pytest-xdist", "ruff", "httpx"):
+        assert Requirement(pins[name]).marker is None
+        requires_python = importlib.metadata.metadata(name).get("Requires-Python")
+        assert requires_python, f"{name} has no Requires-Python metadata"
+        assert SpecifierSet(requires_python).contains(python_version), (
+            f"{name} {pins[name]} does not support Python {python_version}"
+        )
+
+
 def test_runtime_pins_match_installed_versions(project_root: Path) -> None:
     pins = _requirements(project_root / "requirements.txt")
     for name, line in pins.items():

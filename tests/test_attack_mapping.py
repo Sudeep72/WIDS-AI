@@ -10,7 +10,7 @@ def test_attack_mapping_covers_all_rules(project_root: Path) -> None:
     families = payload["families"]
     rules = payload["rules"]
     assert len(families) == 4
-    assert len(rules) == 13
+    assert len(rules) == 15
     assert set(rules.values()) == set(families)
     for mapping in families.values():
         assert set(mapping) == {

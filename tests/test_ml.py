@@ -28,6 +28,8 @@ from wids_ai.ml.isolation_forest import (
     train_isolation_forest,
 )
 
+pytestmark = pytest.mark.slow
+
 BASE = datetime(2025, 1, 1, tzinfo=UTC)
 LABELS_NAME = "labels.json"
 ATTACK_MARKER = "attack_start"

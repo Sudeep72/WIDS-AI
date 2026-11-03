@@ -56,3 +56,12 @@ def test_siem_http_endpoint_requires_tls_unless_localhost() -> None:
         ).siem.http_endpoint
         == "https://siem.example.com/ingest"
     )
+
+
+def test_packaging_metadata(project_root: Path) -> None:
+    text = (project_root / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'version = "0.1.0"' in text
+    assert "License :: OSI Approved :: MIT License" in text
+    assert 'license = {text = "MIT"}' in text
+    assert (project_root / "LICENSE").is_file()
+    assert (project_root / "SECURITY.md").is_file()

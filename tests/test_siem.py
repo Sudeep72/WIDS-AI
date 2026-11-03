@@ -214,6 +214,18 @@ def test_message_is_complete_and_capped_at_sentence_boundary() -> None:
     assert "First sentence remains whole." in event.message
 
 
+def test_raw_keeps_one_evidence_copy_and_api_contract() -> None:
+    alert = _alert()
+    event = alert_to_event(alert, host="sensor")
+    raw = json.loads(event.raw)
+    assert "evidence" in raw
+    assert "rule_evidence" not in raw
+    assert "indicators_found" not in raw
+    api_payload = alert.model_dump(mode="json")
+    assert "evidence" in api_payload
+    assert "indicators_found" in api_payload
+
+
 def test_raw_is_valid_and_bounded_for_oversized_alert() -> None:
     alert = _alert().model_copy(
         update={
@@ -462,6 +474,7 @@ def test_validator_accepts_events_and_reports_bad_line(tmp_path: Path, capsys) -
     assert "exact failure" not in output
 
 
+@pytest.mark.slow
 def test_cli_analyze_writes_ndjson(tmp_path: Path, synthetic_dataset) -> None:
     from wids_ai.capture.base import PcapSource
     from wids_ai.cli import main
@@ -523,7 +536,7 @@ def test_exported_states_table_migration(tmp_path: Path) -> None:
         table = connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'exported_states'"
         ).fetchone()
-    assert version == 4
+    assert version == 5
     assert table[0] == "exported_states"
 
 

@@ -71,7 +71,7 @@ def test_db_round_trip_and_migration(tmp_path: Path) -> None:
     assert db.get_stats()["frames_processed"] == 10
     with sqlite3.connect(tmp_path / "wids.db") as connection:
         version = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-    assert version == 4
+    assert version == 5
 
 
 def test_api_endpoints_and_security_headers(tmp_path: Path) -> None:
@@ -87,7 +87,11 @@ def test_api_endpoints_and_security_headers(tmp_path: Path) -> None:
     assert health.headers["x-content-type-options"] == "nosniff"
     assert health.headers["x-frame-options"] == "DENY"
     assert health.headers["referrer-policy"] == "no-referrer"
-    assert client.get("/api/stats").status_code == 200
+    stats = client.get("/api/stats")
+    assert stats.status_code == 200
+    assert stats.json()["frames_per_second"] == 0.0
+    assert stats.json()["parse_errors"] == 0
+    assert stats.json()["dropped"] == 0
     assert client.get("/api/aps").json()[0]["ssid"] == "LabNet"
     assert client.get("/api/alerts").json()[0]["id"] == "ALT-1"
     assert client.get("/api/alerts/ALT-1").json()["why"] == "two BSSIDs were observed"

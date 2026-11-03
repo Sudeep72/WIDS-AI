@@ -7,8 +7,7 @@ from pathlib import Path
 import pytest
 
 from wids_ai.capture.base import PcapSource
-from wids_ai.features.extractors import FeatureRow, batch_extract
-from wids_ai.features.windowing import WindowConfig
+from wids_ai.features.extractors import FeatureRow
 from wids_ai.inventory import APInventory, KnownAP
 from wids_ai.parser.dot11 import parse_frame
 from wids_ai.parser.models import Frame
@@ -19,7 +18,8 @@ from wids_ai.rules.engine import (
     evaluate_rules,
     load_rules,
 )
-from wids_ai.synthetic.generator import generate_dataset
+
+pytestmark = pytest.mark.slow
 
 BASE = datetime(2025, 1, 1, tzinfo=UTC)
 RULES = Path(__file__).resolve().parent.parent / "wids_ai" / "rules" / "rules"
@@ -101,7 +101,7 @@ def inventory(synthetic: Path) -> APInventory:
 def test_rule_schema_loads_all_families() -> None:
     rules = _rules()
     assert 2 <= sum(rule.family == "evil_twin_rogue_ap" for rule in rules) <= 4
-    assert 2 <= sum(rule.family == "deauth_disassoc_anomaly" for rule in rules) <= 4
+    assert 2 <= sum(rule.family == "deauth_disassoc_anomaly" for rule in rules) <= 6
     assert 2 <= sum(rule.family == "probe_response_karma" for rule in rules) <= 4
     assert 2 <= sum(rule.family == "beacon_management_anomaly" for rule in rules) <= 4
 
@@ -234,6 +234,79 @@ def test_known_oui_format_does_not_trigger_mismatch() -> None:
     assert evaluate_rule(rule, row, [], inventory) is None
 
 
+def test_trusted_sequence_gap_only_does_not_fire() -> None:
+    rule = next(rule for rule in _rules() if rule.id == "WIDS-BEACON-002")
+    row = _row(
+        scope="bssid",
+        group="00:11:22:33:44:55",
+        seq_gap_count=2,
+        seq_duplicate_count=0,
+        beacon_interval_std=4.0,
+        beacon_interval_jitter=3.0,
+        observed_bssids="00:11:22:33:44:55",
+    )
+    assert evaluate_rule(rule, row, [], _inventory()) is None
+
+
+def test_unknown_sequence_gap_still_fires() -> None:
+    rule = next(rule for rule in _rules() if rule.id == "WIDS-BEACON-002")
+    row = _row(
+        scope="bssid",
+        group="02:aa:bb:cc:dd:ee",
+        seq_gap_count=2,
+        seq_duplicate_count=0,
+        beacon_interval_std=4.0,
+        beacon_interval_jitter=3.0,
+        observed_bssids="02:aa:bb:cc:dd:ee",
+    )
+    detection = evaluate_rule(rule, row, [], _inventory())
+    assert detection is not None
+    assert detection.evidence[0].field == "seq_gap_count"
+
+
+def test_interleaved_duplicate_streams_still_fire() -> None:
+    rule = next(rule for rule in _rules() if rule.id == "WIDS-BEACON-002")
+    row = _row(
+        scope="bssid",
+        group="00:11:22:33:44:55",
+        seq_gap_count=0,
+        seq_duplicate_count=2,
+        beacon_interval_std=4.0,
+        beacon_interval_jitter=3.0,
+        observed_bssids="00:11:22:33:44:55",
+    )
+    detection = evaluate_rule(rule, row, [], _inventory())
+    assert detection is not None
+    assert detection.evidence[0].field == "seq_duplicate_count"
+
+
+def test_rolling_deauth_rules_detect_spread_activity() -> None:
+    rules = {rule.id: rule for rule in _rules()}
+    frames = [
+        Frame(
+            timestamp=BASE + timedelta(seconds=index * 12),
+            frame_type="management",
+            subtype="deauthentication",
+            type_code=0,
+            subtype_code=12,
+            addr1="de:ad:cc:00:00:02",
+            addr2="02:de:ad:de:02:02",
+            addr3="02:de:ad:de:02:02",
+            bssid="02:de:ad:de:02:02",
+            reason_code=7,
+        )
+        for index in range(12)
+    ]
+    detections = evaluate_rules(
+        [],
+        [rules["WIDS-DEAUTH-005"], rules["WIDS-DEAUTH-006"]],
+        frames,
+        _inventory(),
+    )
+    assert {item.rule_id for item in detections} == {"WIDS-DEAUTH-005", "WIDS-DEAUTH-006"}
+    assert all(item.evidence[0].observed == 6 for item in detections)
+
+
 def test_hits_merge_into_one_incident() -> None:
     rule = next(rule for rule in _rules() if rule.id == "WIDS-DEAUTH-001")
     frames = []
@@ -343,6 +416,8 @@ RULE_SCENARIOS = {
     "WIDS-DEAUTH-002": "mixed_deauth_burst",
     "WIDS-DEAUTH-003": "mixed_deauth_burst",
     "WIDS-DEAUTH-004": "mixed_deauth_burst",
+    "WIDS-DEAUTH-005": "mixed_low_slow_deauth",
+    "WIDS-DEAUTH-006": "mixed_low_slow_deauth",
     "WIDS-KARMA-001": "mixed_karma_probe_responses",
     "WIDS-KARMA-002": "mixed_karma_probe_responses",
     "WIDS-BEACON-001": "mixed_beacon_sequence_anomaly",
@@ -378,30 +453,18 @@ def test_each_rule_does_not_fire_on_benign(
 
 @pytest.mark.slow
 @pytest.mark.parametrize("seed", [1, 2, 3, 42, 99])
-def test_seed_robustness(seed: int, tmp_path: Path) -> None:
-    dataset = tmp_path / f"synthetic-{seed}"
-    generate_dataset(dataset, seed=seed)
-    labels_payload = json.loads((dataset / "labels.json").read_text(encoding="utf-8"))
-    labels = {item["scenario"]: item for item in labels_payload["scenarios"]}
-    benign_frames = _loaded_frames(dataset / "benign_baseline.pcap")
-    seed_inventory = APInventory.from_frames(benign_frames)
-    benign_features = batch_extract(benign_frames, WindowConfig(10, 5))
-    benign_rows = [
-        FeatureRow.model_validate(item.to_dict()) for _, item in benign_features.iterrows()
-    ]
-    assert deduplicate(evaluate_rules(benign_rows, _rules(), benign_frames, seed_inventory)) == []
+def test_seed_robustness(seed: int, evaluated_seed) -> None:
+    artifacts = evaluated_seed(seed)
+    assert artifacts.results["benign_baseline"].incidents == ()
     for name in (
         "mixed_evil_twin",
         "mixed_deauth_burst",
         "mixed_karma_probe_responses",
         "mixed_beacon_sequence_anomaly",
     ):
-        frames = _loaded_frames(dataset / f"{name}.pcap")
-        feature_frame = batch_extract(frames, WindowConfig(10, 5))
-        rows = [FeatureRow.model_validate(item.to_dict()) for _, item in feature_frame.iterrows()]
-        incidents = deduplicate(evaluate_rules(rows, _rules(), frames, seed_inventory))
-        start = datetime.fromisoformat(labels[name]["details"]["attack_start"])
-        end = datetime.fromisoformat(labels[name]["details"]["attack_end"])
+        incidents = artifacts.results[name].incidents
+        start = datetime.fromisoformat(artifacts.labels[name]["details"]["attack_start"])
+        end = datetime.fromisoformat(artifacts.labels[name]["details"]["attack_end"])
         tolerance = timedelta(seconds=10)
         assert incidents, f"{name} produced no incidents for seed {seed}"
         assert any(

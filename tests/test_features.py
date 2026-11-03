@@ -17,6 +17,8 @@ from wids_ai.features.windowing import WindowConfig
 from wids_ai.parser.dot11 import parse_frame
 from wids_ai.parser.models import Frame
 
+pytestmark = pytest.mark.slow
+
 BASE = datetime(2025, 1, 1, tzinfo=UTC)
 
 

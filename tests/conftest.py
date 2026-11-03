@@ -1,10 +1,27 @@
 from __future__ import annotations
 
+import os
+import shutil
+import time
 from pathlib import Path
 
 import pytest
 
 from wids_ai.synthetic.generator import generate_dataset
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config: pytest.Config) -> None:
+    """Use unique per-run temp and cache paths on Windows."""
+    root = Path(__file__).resolve().parent.parent / ".tmp"
+    run_id = f"{os.getpid()}-{time.time_ns()}"
+    base = root / f"pytest-{run_id}"
+    cache = root / f"pytest-cache-{run_id}"
+    for path in (base, cache):
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+    config.option.basetemp = str(base)
+    config.option.cache_dir = str(cache)
 
 
 @pytest.fixture
