@@ -49,7 +49,9 @@ th { color: var(--muted); font-weight: 600; }
 .badge.low { background: var(--low); color: #082f49; }
 .badge.informational { background: var(--informational); color: white; }
 .sparkline { fill: none; stroke: var(--low); stroke-width: 2; }
-.sparkline-empty { fill: var(--muted); font-size: 12px; }
+.sparkline-empty, .sparkline-label { fill: var(--muted); font-size: 10px; }
+.sparkline-baseline { stroke: var(--border); stroke-width: 1; }
+.sparkline-alert-point { fill: var(--high); }
 section + section { margin-top: 28px; }
 .empty, .error { background: var(--panel); border: 1px dashed var(--border); padding: 16px; border-radius: 8px; }
 .error { color: #fecaca; border-color: var(--critical); }

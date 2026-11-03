@@ -1,6 +1,11 @@
 "use strict";
 
-const state = { paused: false, timer: null };
+const state = {
+  paused: false,
+  timer: null,
+  expanded: new Set(),
+  alertSignature: "",
+};
 
 const byId = (id) => document.getElementById(id);
 
@@ -40,30 +45,66 @@ function renderCounts(container, counts) {
   });
 }
 
-function renderSparkline(scores) {
+function renderSparkline(scores, alerts) {
   const svg = byId("ml-sparkline");
   svg.replaceChildren();
-  if (!scores || scores.length === 0) {
+  if (!scores || scores.length < 2) {
     const empty = document.createElementNS("http://www.w3.org/2000/svg", "text");
     empty.setAttribute("x", "12");
     empty.setAttribute("y", "44");
     empty.setAttribute("class", "sparkline-empty");
-    empty.textContent = "No ML score data";
+    empty.textContent = "Not enough ML score data";
     svg.append(empty);
     return;
   }
   const width = 320;
-  const height = 80;
-  const step = scores.length > 1 ? width / (scores.length - 1) : width;
-  const points = scores.map((entry, index) => {
-    const x = index * step;
-    const y = height - Math.max(0, Math.min(1, Number(entry.score))) * height;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
+  const height = 64;
+  const top = 8;
+  const values = scores.map((entry) => Number(entry.score));
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const step = width / (scores.length - 1);
+  const yFor = (value) => top + (1 - Math.max(0, Math.min(1, value))) * height;
+  const baseline = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  baseline.setAttribute("x1", "0");
+  baseline.setAttribute("x2", String(width));
+  baseline.setAttribute("y1", String(top + height));
+  baseline.setAttribute("y2", String(top + height));
+  baseline.setAttribute("class", "sparkline-baseline");
+  svg.append(baseline);
+  const points = scores.map((entry, index) => `${(index * step).toFixed(1)},${yFor(Number(entry.score)).toFixed(1)}`).join(" ");
   const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
   line.setAttribute("points", points);
   line.setAttribute("class", "sparkline");
   svg.append(line);
+  const spans = (alerts || []).map((alert) => [Date.parse(alert.first_seen), Date.parse(alert.last_seen)]);
+  scores.forEach((entry, index) => {
+    const timestamp = Date.parse(entry.timestamp);
+    if (spans.some(([start, end]) => timestamp >= start && timestamp <= end)) {
+      const marker = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      marker.setAttribute("cx", (index * step).toFixed(1));
+      marker.setAttribute("cy", yFor(Number(entry.score)).toFixed(1));
+      marker.setAttribute("r", "2.5");
+      marker.setAttribute("class", "sparkline-alert-point");
+      svg.append(marker);
+    }
+  });
+  const minLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  minLabel.setAttribute("x", "2");
+  minLabel.setAttribute("y", "77");
+  minLabel.setAttribute("class", "sparkline-label");
+  minLabel.textContent = `min ${minimum.toFixed(3)}`;
+  svg.append(minLabel);
+  const maxLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  maxLabel.setAttribute("x", "250");
+  maxLabel.setAttribute("y", "77");
+  maxLabel.setAttribute("class", "sparkline-label");
+  maxLabel.textContent = `max ${maximum.toFixed(3)}`;
+  svg.append(maxLabel);
+}
+
+function alertSignature(alert) {
+  return [alert.id, alert.hit_count, alert.last_seen, alert.risk_score].join("|");
 }
 
 function renderAPs(aps) {
@@ -98,6 +139,13 @@ function renderAPs(aps) {
   });
 }
 
+function evidenceText(item) {
+  if (item.text) return item.text;
+  const operator = item.operator || "?";
+  const threshold = item.threshold === undefined ? "?" : item.threshold;
+  return `${item.field}: observed ${item.observed}, expected ${operator} ${threshold}`;
+}
+
 function detailList(title, items) {
   const wrapper = document.createElement("div");
   const heading = document.createElement("h4");
@@ -106,53 +154,94 @@ function detailList(title, items) {
   const list = document.createElement("ul");
   (items || []).forEach((item) => {
     const li = document.createElement("li");
-    setText(li, item.text || `${item.field}: ${item.observed} expected ${item.threshold}`);
+    setText(li, evidenceText(item));
     list.append(li);
   });
   wrapper.append(list);
   return wrapper;
 }
 
+function buildAlertItem(alert) {
+  const item = document.createElement("li");
+  item.className = "alert";
+  item.dataset.alertId = alert.id;
+  item.dataset.signature = alertSignature(alert);
+  const summary = document.createElement("button");
+  summary.type = "button";
+  summary.className = "alert-summary";
+  const badge = document.createElement("span");
+  badge.className = severityClass(alert.severity);
+  setText(badge, alert.severity);
+  const risk = document.createElement("strong");
+  setText(risk, `Risk ${alert.risk_score}`);
+  const family = document.createElement("span");
+  setText(family, alert.family);
+  const technique = document.createElement("span");
+  setText(technique, alert.mitre_attack && alert.mitre_attack.technique ? alert.mitre_attack.technique : "-");
+  const time = document.createElement("span");
+  setText(time, alert.timestamp);
+  summary.append(badge, risk, family, technique, time);
+  const detail = document.createElement("div");
+  detail.className = "alert-detail";
+  const why = document.createElement("p");
+  setText(why, sentenceTruncate(alert.why));
+  detail.append(why);
+  detail.append(detailList("Evidence", alert.evidence || alert.rule_evidence));
+  detail.append(detailList("Indicators found", alert.indicators_found));
+  detail.append(detailList("Indicators not found", alert.indicators_not_found));
+  summary.addEventListener("click", () => {
+    if (state.expanded.has(alert.id)) state.expanded.delete(alert.id);
+    else state.expanded.add(alert.id);
+    detail.hidden = !state.expanded.has(alert.id);
+    summary.setAttribute("aria-expanded", detail.hidden ? "false" : "true");
+  });
+  item.append(summary, detail);
+  return item;
+}
+
+function applyExpandedState(item) {
+  const expanded = state.expanded.has(item.dataset.alertId);
+  const detail = item.querySelector(".alert-detail");
+  const summary = item.querySelector(".alert-summary");
+  if (detail) detail.hidden = !expanded;
+  if (summary) summary.setAttribute("aria-expanded", expanded ? "true" : "false");
+}
+
 function renderAlerts(alerts) {
   const list = byId("alerts-list");
-  list.replaceChildren();
   const empty = byId("empty-state");
   empty.hidden = (alerts || []).length > 0;
+  const signature = JSON.stringify((alerts || []).map(alertSignature));
+  if (signature === state.alertSignature) {
+    list.querySelectorAll(".alert").forEach(applyExpandedState);
+    return;
+  }
+  const active = document.activeElement;
+  const activeId = active && active.closest ? active.closest(".alert")?.dataset.alertId : null;
+  const scrollY = window.scrollY;
+  const existing = new Map(
+    Array.from(list.querySelectorAll(".alert")).map((item) => [item.dataset.alertId, item]),
+  );
+  const next = document.createDocumentFragment();
   (alerts || []).forEach((alert) => {
-    const item = document.createElement("li");
-    item.className = "alert";
-    const summary = document.createElement("button");
-    summary.type = "button";
-    summary.className = "alert-summary";
-    summary.setAttribute("aria-expanded", "false");
-    const badge = document.createElement("span");
-    badge.className = severityClass(alert.severity);
-    setText(badge, alert.severity);
-    const risk = document.createElement("strong");
-    setText(risk, `Risk ${alert.risk_score}`);
-    const family = document.createElement("span");
-    setText(family, alert.family);
-    const technique = document.createElement("span");
-    setText(technique, alert.mitre_attack && alert.mitre_attack.technique ? alert.mitre_attack.technique : "-");
-    const time = document.createElement("span");
-    setText(time, alert.timestamp);
-    summary.append(badge, risk, family, technique, time);
-    const detail = document.createElement("div");
-    detail.className = "alert-detail";
-    detail.hidden = true;
-    const why = document.createElement("p");
-    setText(why, sentenceTruncate(alert.why));
-    detail.append(why);
-    detail.append(detailList("Evidence", alert.evidence || alert.rule_evidence));
-    detail.append(detailList("Indicators found", alert.indicators_found));
-    detail.append(detailList("Indicators not found", alert.indicators_not_found));
-    summary.addEventListener("click", () => {
-      detail.hidden = !detail.hidden;
-      summary.setAttribute("aria-expanded", detail.hidden ? "false" : "true");
-    });
-    item.append(summary, detail);
-    list.append(item);
+    const signatureValue = alertSignature(alert);
+    const current = existing.get(alert.id);
+    if (current && current.dataset.signature === signatureValue) {
+      next.append(current);
+    } else {
+      next.append(buildAlertItem(alert));
+    }
   });
+  list.replaceChildren(next);
+  list.querySelectorAll(".alert").forEach((item) => {
+    applyExpandedState(item);
+  });
+  if (activeId) {
+    const restored = list.querySelector(`[data-alert-id="${CSS.escape(activeId)}"] .alert-summary`);
+    if (restored) restored.focus({ preventScroll: true });
+  }
+  window.scrollTo(0, scrollY);
+  state.alertSignature = signature;
 }
 
 async function fetchJSON(url) {
@@ -174,17 +263,25 @@ async function refresh() {
   };
   const severity = byId("severity-filter").value;
   const suffix = severity ? `?severity=${encodeURIComponent(severity)}` : "";
+  let alertsPayload = [];
   await Promise.all([
     load("stats", "/api/stats", (stats) => {
       setText(byId("stat-frames"), stats.frames_processed);
       setText(byId("stat-windows"), stats.windows);
+      setText(byId("run-id"), stats.run_id === null ? "-" : stats.run_id);
+      setText(byId("run-started"), stats.run_started_at || "-");
       renderCounts(byId("severity-counts"), stats.alerts_by_severity);
       renderCounts(byId("family-counts"), stats.alerts_by_family);
-      renderSparkline(stats.latest_ml_scores);
+      state.stats = stats;
     }),
     load("APs", "/api/aps", renderAPs),
-    load("alerts", `/api/alerts${suffix}`, renderAlerts),
+    load("alerts", `/api/alerts${suffix}`, (alerts) => {
+      alertsPayload = alerts;
+      state.alerts = alerts;
+    }),
   ]);
+  if (state.stats) renderSparkline(state.stats.latest_ml_scores, alertsPayload);
+  if (state.alerts) renderAlerts(state.alerts);
   const error = byId("error-state");
   if (failures.length) {
     error.hidden = false;
