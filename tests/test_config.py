@@ -39,3 +39,20 @@ def test_defaults_are_valid() -> None:
     settings = Settings()
     assert settings.ml.random_seed == 42
     assert settings.api.port == 8000
+
+
+def test_siem_http_endpoint_requires_tls_unless_localhost() -> None:
+    with pytest.raises(ValidationError):
+        Settings.model_validate({"siem": {"http_endpoint": "http://example.com/ingest"}})
+    assert (
+        Settings.model_validate(
+            {"siem": {"http_endpoint": "http://127.0.0.1:9000/ingest"}}
+        ).siem.http_endpoint
+        == "http://127.0.0.1:9000/ingest"
+    )
+    assert (
+        Settings.model_validate(
+            {"siem": {"http_endpoint": "https://siem.example.com/ingest"}}
+        ).siem.http_endpoint
+        == "https://siem.example.com/ingest"
+    )

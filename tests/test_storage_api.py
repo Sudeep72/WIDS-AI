@@ -71,7 +71,7 @@ def test_db_round_trip_and_migration(tmp_path: Path) -> None:
     assert db.get_stats()["frames_processed"] == 10
     with sqlite3.connect(tmp_path / "wids.db") as connection:
         version = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-    assert version == 3
+    assert version == 4
 
 
 def test_api_endpoints_and_security_headers(tmp_path: Path) -> None:
