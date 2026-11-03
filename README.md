@@ -102,7 +102,7 @@ and Sigma examples are in `docs/NANOSIEM_INTEGRATION.md`.
 
 ## Screenshots
 
-- [Dashboard placeholder](docs/img/dashboard.png)
+- [Dashboard placeholder](https://github.com/Sudeep72/WIDS-AI/blob/main/docs/img/dashboard.png)
 - [Alert detail placeholder](docs/img/alert-detail.png)
 
 ## Roadmap
