@@ -123,3 +123,12 @@ Replay statistics default to the latest run. Cumulative statistics are available
 with `/api/stats?run=all`. A fresh replay clears alerts, APs, incidents, frame
 summaries, and the ML score series before creating a new run, preventing double
 counting when the same PCAP is replayed.
+
+
+## M10 evaluation pipeline
+
+`wids_ai.pipeline.analyze_frames` is the shared path used by offline analysis, replay, tests, and evaluation. It parses frames, builds timestamp windows, extracts features, evaluates rules and AP inventory context, optionally scores scope models, deduplicates incidents, and correlates alerts. This keeps CLI and replay alert IDs comparable.
+
+`tools/evaluate.py` runs seeds 1, 2, 3, 42, and 99. It trains only from each seed benign PCAP and writes `docs/EVALUATION.md` from measured results. The report is synthetic-only. Challenge scenarios are intentionally reported without forcing them to pass.
+
+`tools/benchmark.py` measures offline full-pipeline throughput. Peak memory is reported when the platform provides `resource`; it is unavailable on this Windows runtime.
