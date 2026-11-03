@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import itertools
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -70,7 +72,7 @@ def test_parser_round_trip_counts(
     _, labels = generated
     for scenario, frames in parsed_frames.items():
         assert len(frames) == labels[scenario]["packet_count"]
-        assert all(frame.channel in {1, 6, 11} for frame in frames)
+        assert all(frame.channel in {1, 6, 11, 36} for frame in frames)
         assert all(frame.rssi is not None for frame in frames)
 
 
@@ -128,6 +130,55 @@ def test_evil_twin_and_deauth_are_labeled(
     assert labels["beacon_sequence_anomaly"]["attack_family"] == "beacon_management_anomaly"
 
 
+def test_challenge_scenarios_are_labeled_and_nontrivial(
+    generated: tuple[Path, dict[str, dict[str, object]]],
+    parsed_frames: dict[str, tuple[Frame, ...]],
+) -> None:
+    _, labels = generated
+    noisy = labels["benign_noisy"]
+    assert noisy["attack_family"] == "benign"
+    assert noisy["label"] == "benign"
+    assert noisy["details"]["roaming_client"]
+    assert noisy["details"]["restarting_bssid"]
+    assert noisy["details"]["new_ap_bssid"]
+    noisy_sources = {frame.bssid for frame in parsed_frames["benign_noisy"] if frame.bssid}
+    assert noisy["details"]["new_ap_bssid"] in noisy_sources
+    restarting = noisy["details"]["restarting_bssid"]
+    restart_frames = sorted(
+        (
+            frame
+            for frame in parsed_frames["benign_noisy"]
+            if frame.bssid == restarting and frame.subtype == "beacon"
+        ),
+        key=lambda frame: frame.timestamp,
+    )
+    gaps = [
+        (right.timestamp - left.timestamp).total_seconds()
+        for left, right in itertools.pairwise(restart_frames)
+    ]
+    assert len(gaps) >= 18
+    assert min(frame.seq_num for frame in restart_frames if frame.seq_num is not None) == 0
+    expected_restart = datetime.fromisoformat(noisy["start"]) + timedelta(seconds=292)
+    assert restart_frames[0].timestamp >= expected_restart
+    assert noisy["details"]["restart_gap_seconds"] >= 10
+
+    slow = labels["low_slow_deauth"]
+    assert slow["attack_family"] == "deauth_disassoc_anomaly"
+    slow_frames = [
+        frame for frame in parsed_frames["low_slow_deauth"] if frame.subtype == "deauthentication"
+    ]
+    assert len(slow_frames) == 12
+    assert (
+        max(frame.timestamp for frame in slow_frames)
+        - min(frame.timestamp for frame in slow_frames)
+    ).total_seconds() > 120
+
+    smart = labels["evil_twin_matching_oui"]
+    assert smart["details"]["oui_match"] is True
+    assert smart["details"]["channel_match"] is True
+    assert smart["attack_family"] == "evil_twin_rogue_ap"
+
+
 def test_benign_timestamps_sequences_and_jitter_are_varied(
     parsed_frames: dict[str, tuple[Frame, ...]],
 ) -> None:
@@ -151,6 +202,8 @@ def test_mixed_scenarios_include_benign_background_and_attacks(
         "mixed_deauth_burst",
         "mixed_karma_probe_responses",
         "mixed_beacon_sequence_anomaly",
+        "mixed_low_slow_deauth",
+        "mixed_evil_twin_matching_oui",
     }
     benign_count = labels["benign_baseline"]["packet_count"]
     for name, metadata in mixed.items():
@@ -191,6 +244,8 @@ MIXED_NAMES = (
     "mixed_deauth_burst",
     "mixed_karma_probe_responses",
     "mixed_beacon_sequence_anomaly",
+    "mixed_low_slow_deauth",
+    "mixed_evil_twin_matching_oui",
 )
 
 

@@ -38,10 +38,13 @@ def parsed_synthetic(synthetic_dataset):
     result = {}
     for name in (
         "benign_baseline",
+        "benign_noisy",
         "mixed_evil_twin",
         "mixed_deauth_burst",
         "mixed_karma_probe_responses",
         "mixed_beacon_sequence_anomaly",
+        "mixed_low_slow_deauth",
+        "mixed_evil_twin_matching_oui",
     ):
         frames = [
             frame
@@ -52,3 +55,19 @@ def parsed_synthetic(synthetic_dataset):
         rows = [FeatureRow.model_validate(item.to_dict()) for _, item in feature_frame.iterrows()]
         result[name] = (frames, rows)
     return dataset, result
+
+
+@pytest.fixture(scope="session")
+def evaluated_seed(tmp_path_factory, synthetic_dataset):
+    from wids_ai.evaluation import build_seed_artifacts
+
+    cache = {}
+
+    def build(seed: int = 42):
+        if seed not in cache:
+            work_root = tmp_path_factory.mktemp(f"evaluation-seed-{seed}")
+            dataset = synthetic_dataset(seed)
+            cache[seed] = build_seed_artifacts(seed, dataset, work_root)
+        return cache[seed]
+
+    return build

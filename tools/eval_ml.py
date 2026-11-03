@@ -27,6 +27,8 @@ MODEL_NAMES = (
     "mixed_deauth_burst",
     "mixed_karma_probe_responses",
     "mixed_beacon_sequence_anomaly",
+    "mixed_low_slow_deauth",
+    "mixed_evil_twin_matching_oui",
 )
 SEEDS = (1, 2, 3, 42, 99)
 

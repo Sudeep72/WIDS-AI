@@ -212,6 +212,28 @@ def test_unknown_ap_oui_mismatch(inventory: APInventory) -> None:
     assert detection.evidence[0].field in {"unknown_bssid_count", "oui_mismatch"}
 
 
+def test_known_oui_format_does_not_trigger_mismatch() -> None:
+    rule = next(rule for rule in _rules() if rule.id == "WIDS-EVIL-002")
+    inventory = APInventory(
+        aps={
+            "00:11:22:33:44:55": KnownAP(
+                bssid="00:11:22:33:44:55",
+                ssid="LabNet",
+                oui="001122",
+                channels=(6,),
+                security="open",
+                mean_rssi=-42,
+            )
+        }
+    )
+    row = _row(
+        distinct_bssids=2,
+        observed_bssids="00:11:22:33:44:55,00:11:22:aa:bb:01",
+        observed_security_modes="open",
+    )
+    assert evaluate_rule(rule, row, [], inventory) is None
+
+
 def test_hits_merge_into_one_incident() -> None:
     rule = next(rule for rule in _rules() if rule.id == "WIDS-DEAUTH-001")
     frames = []

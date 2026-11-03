@@ -155,3 +155,10 @@ def test_non_dot11_packet_is_ignored() -> None:
 def test_malformed_dot11_is_ignored() -> None:
     packet = _radio() / Dot11(type=0, subtype=8, addr1=None, addr2=None, addr3=None)
     assert parse_frame(packet) is None
+
+
+def test_parser_fuzz_never_raises_unhandled_exception() -> None:
+    from wids_ai.fuzz import fuzz_cases, parse_fuzz_cases
+
+    accepted = parse_fuzz_cases(fuzz_cases(seed=11, count=2000))
+    assert accepted >= 0
