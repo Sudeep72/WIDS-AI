@@ -132,3 +132,16 @@ counting when the same PCAP is replayed.
 `tools/evaluate.py` runs seeds 1, 2, 3, 42, and 99. It trains only from each seed benign PCAP and writes `docs/EVALUATION.md` from measured results. The report is synthetic-only. Challenge scenarios are intentionally reported without forcing them to pass.
 
 `tools/benchmark.py` measures offline full-pipeline throughput. Peak memory is reported when the platform provides `resource`; it is unavailable on this Windows runtime.
+
+
+## M11 live path
+
+Live capture preflights Linux, privileges, the interface, monitor mode, and RadioTap.
+Packets are timestamped with `time.time()` at arrival because RadioTap has no wall
+clock. The same parser, windowing, features, rules, ML, correlation, and persistence
+path used for replay handles the resulting frames. Ctrl+C stops capture, flushes the
+window state, writes the PCAP, closes the database, and returns cleanly.
+
+`/api/stats` reports latest-run frames per second, parse errors, and queue drops.
+Channel hopping is off by default and uses a fixed `iw dev <iface> set channel N`
+argument list when requested.

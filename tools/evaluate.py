@@ -108,34 +108,83 @@ def comparison_table(report):
 
 
 def benchmark(pcap, repeats):
-    import time
+    import subprocess
 
-    from wids_ai.pipeline import analyze_pcap
-
-    durations = []
-    frames = 0
-    for _ in range(repeats):
-        started = time.perf_counter()
-        result = analyze_pcap(pcap, use_ml=False)
-        durations.append(time.perf_counter() - started)
-        frames = result.frame_count
-    peak = None
-    try:
-        import resource
-    except ImportError:
-        pass
-    else:
-        raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        peak = raw / (1024 * 1024) if raw > 1024 * 1024 else raw / 1024
-    best = min(durations)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "tools" / "benchmark.py"),
+            "--pcap",
+            str(pcap),
+            "--repeat",
+            str(repeats),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    values = {}
+    for line in completed.stdout.splitlines():
+        if ": " in line:
+            key, value = line.split(": ", 1)
+            values[key] = value
     return {
-        "pcap": str(pcap),
-        "frames": frames,
+        "pcap": values.get("PCAP", str(pcap)),
+        "frames": int(values.get("Frames", "0")),
         "repeat": repeats,
-        "best_seconds": best,
-        "frames_per_second": frames / best if best else 0.0,
-        "peak_memory_mb": peak,
+        "best_seconds": float(values.get("Best seconds", "0")),
+        "frames_per_second": float(values.get("Frames per second", "0")),
+        "peak_memory_mb": (
+            float(values["Peak memory MB"])
+            if values.get("Peak memory MB", "unavailable") != "unavailable"
+            else None
+        ),
     }
+
+
+BEFORE_2026_11 = {
+    "fpr_alerts_per_hour_by_seed": {
+        "1": 2.5,
+        "2": 5.0,
+        "3": 0.0,
+        "42": 0.0,
+        "99": 2.5,
+    },
+    "deauth_recall": 0.500,
+    "deauth_missed": "mixed_low_slow_deauth",
+    "beacon_precision": 0.700,
+    "beacon_fp_mean": 0.60,
+}
+
+
+def comparison_summary(old: dict, new: dict) -> list[str]:
+    before = old["fpr_alerts_per_hour_by_seed"]
+    after = new["fpr_alerts_per_hour_by_seed"]
+    return [
+        "| Metric | Before M11 | After M11 |",
+        "| --- | ---: | ---: |",
+        "| Benign/noisy false positives per hour, seed 1 | {} | {} |".format(
+            num(before["1"]), num(after["1"])
+        ),
+        "| Benign/noisy false positives per hour, seed 2 | {} | {} |".format(
+            num(before["2"]), num(after["2"])
+        ),
+        "| Benign/noisy false positives per hour, seed 99 | {} | {} |".format(
+            num(before["99"]), num(after["99"])
+        ),
+        "| Deauth recall | {} | {} |".format(
+            num(old["deauth_recall"]),
+            num(new["family_summary"]["deauth_disassoc_anomaly"]["recall_mean"]),
+        ),
+        "| Beacon precision | {} | {} |".format(
+            num(old["beacon_precision"]),
+            num(new["family_summary"]["beacon_management_anomaly"]["precision_mean"]),
+        ),
+        "| Beacon false positives per seed | {} | {} |".format(
+            num(old["beacon_fp_mean"]),
+            num(new["family_summary"]["beacon_management_anomaly"]["fp_mean"]),
+        ),
+    ]
 
 
 def render(report, ml_report, bench):
@@ -157,6 +206,13 @@ def render(report, ml_report, bench):
         "be presented as a production benchmark. The evaluation uses seeds 1, 2, 3, 42,",
         "and 99. Training uses only each seed's benign PCAP. The labeled attack window",
         f"tolerance is {report['tolerance_seconds']} seconds.",
+        "",
+        "## Before and after M11 fixes",
+        "",
+        "The before column is copied from the measured M10 report. The after column",
+        "is generated from the current rules and does not reuse old labels.",
+        "",
+        *comparison_summary(BEFORE_2026_11, report),
         "",
         "## Family metrics",
         "",
@@ -224,8 +280,10 @@ def render(report, ml_report, bench):
         "",
         "- `benign_noisy` includes legitimate roaming, an AP restart, and a new AP. Actionable",
         "  alerts are reported above and are not hidden.",
-        "- `mixed_low_slow_deauth` contains 12 deauth frames over 132 seconds. If missed,",
-        "  the table and recall show the miss. Thresholds were not lowered to make it pass.",
+        "- `mixed_low_slow_deauth` contains 12 deauth frames over 132 seconds.",
+        "  The cumulative 300-second BSSID and client rules are evaluated without",
+        "  changing the generator to make them pass. Their exact outcome is shown",
+        "  in the scenario table.",
         "- `mixed_evil_twin_matching_oui` uses the trusted OUI and channel. Remaining",
         "  duplicate-SSID or RSSI evidence is reported per scenario.",
         "",

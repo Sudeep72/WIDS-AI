@@ -8,6 +8,20 @@ be presented as a production benchmark. The evaluation uses seeds 1, 2, 3, 42,
 and 99. Training uses only each seed's benign PCAP. The labeled attack window
 tolerance is 10.0 seconds.
 
+## Before and after M11 fixes
+
+The before column is copied from the measured M10 report. The after column is
+generated from the current rules and does not reuse old labels.
+
+| Metric | Before M11 | After M11 |
+| --- | ---: | ---: |
+| Benign/noisy false positives per hour, seed 1 | 2.500 | 0.000 |
+| Benign/noisy false positives per hour, seed 2 | 5.000 | 0.000 |
+| Benign/noisy false positives per hour, seed 99 | 2.500 | 0.000 |
+| Deauth recall | 0.500 | 1.000 |
+| Beacon precision | 0.700 | 1.000 |
+| Beacon false positives per seed | 0.600 | 0.000 |
+
 ## Family metrics
 
 Counts are means across the five seeds. Precision and recall use per-seed counts.
@@ -16,9 +30,9 @@ Detection delay is from labeled attack start to the first expected-family alert.
 | Family | TP mean | FP mean | FN mean | Precision | Recall | Delay mean (s) | Delay std (s) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | evil_twin_rogue_ap | 2.00 | 0.00 | 0.00 | 1.000 | 1.000 | 0.000 | 0.000 |
-| deauth_disassoc_anomaly | 1.00 | 0.00 | 1.00 | 1.000 | 0.500 | 0.000 | 0.000 |
+| deauth_disassoc_anomaly | 2.00 | 0.00 | 0.00 | 1.000 | 1.000 | 0.000 | 0.000 |
 | probe_response_karma | 1.00 | 0.00 | 0.00 | 1.000 | 1.000 | 0.030 | 0.000 |
-| beacon_management_anomaly | 1.00 | 0.60 | 0.00 | 0.700 | 1.000 | 0.000 | 0.000 |
+| beacon_management_anomaly | 1.00 | 0.00 | 0.00 | 1.000 | 1.000 | 0.000 | 0.000 |
 
 ## Per-seed metrics
 
@@ -29,21 +43,21 @@ Detection delay is from labeled attack start to the first expected-family alert.
 | 3 | evil_twin_rogue_ap | 2 | 0 | 0 | 1.000 | 1.000 | 0.000 |
 | 42 | evil_twin_rogue_ap | 2 | 0 | 0 | 1.000 | 1.000 | 0.000 |
 | 99 | evil_twin_rogue_ap | 2 | 0 | 0 | 1.000 | 1.000 | 0.000 |
-| 1 | deauth_disassoc_anomaly | 1 | 0 | 1 | 1.000 | 0.500 | 0.000 |
-| 2 | deauth_disassoc_anomaly | 1 | 0 | 1 | 1.000 | 0.500 | 0.000 |
-| 3 | deauth_disassoc_anomaly | 1 | 0 | 1 | 1.000 | 0.500 | 0.000 |
-| 42 | deauth_disassoc_anomaly | 1 | 0 | 1 | 1.000 | 0.500 | 0.000 |
-| 99 | deauth_disassoc_anomaly | 1 | 0 | 1 | 1.000 | 0.500 | 0.000 |
+| 1 | deauth_disassoc_anomaly | 2 | 0 | 0 | 1.000 | 1.000 | 0.000 |
+| 2 | deauth_disassoc_anomaly | 2 | 0 | 0 | 1.000 | 1.000 | 0.000 |
+| 3 | deauth_disassoc_anomaly | 2 | 0 | 0 | 1.000 | 1.000 | 0.000 |
+| 42 | deauth_disassoc_anomaly | 2 | 0 | 0 | 1.000 | 1.000 | 0.000 |
+| 99 | deauth_disassoc_anomaly | 2 | 0 | 0 | 1.000 | 1.000 | 0.000 |
 | 1 | probe_response_karma | 1 | 0 | 0 | 1.000 | 1.000 | 0.030 |
 | 2 | probe_response_karma | 1 | 0 | 0 | 1.000 | 1.000 | 0.030 |
 | 3 | probe_response_karma | 1 | 0 | 0 | 1.000 | 1.000 | 0.030 |
 | 42 | probe_response_karma | 1 | 0 | 0 | 1.000 | 1.000 | 0.030 |
 | 99 | probe_response_karma | 1 | 0 | 0 | 1.000 | 1.000 | 0.030 |
-| 1 | beacon_management_anomaly | 1 | 1 | 0 | 0.500 | 1.000 | 0.000 |
-| 2 | beacon_management_anomaly | 1 | 1 | 0 | 0.500 | 1.000 | 0.000 |
+| 1 | beacon_management_anomaly | 1 | 0 | 0 | 1.000 | 1.000 | 0.000 |
+| 2 | beacon_management_anomaly | 1 | 0 | 0 | 1.000 | 1.000 | 0.000 |
 | 3 | beacon_management_anomaly | 1 | 0 | 0 | 1.000 | 1.000 | 0.000 |
 | 42 | beacon_management_anomaly | 1 | 0 | 0 | 1.000 | 1.000 | 0.000 |
-| 99 | beacon_management_anomaly | 1 | 1 | 0 | 0.500 | 1.000 | 0.000 |
+| 99 | beacon_management_anomaly | 1 | 0 | 0 | 1.000 | 1.000 | 0.000 |
 
 ## Scenario outcomes
 
@@ -52,35 +66,35 @@ Every challenge outcome is shown, including misses and cross-family hits.
 | Seed | Scenario | Expected | Detected | Delay (s) | Rules | Cross-family |
 | ---: | --- | --- | --- | ---: | --- | --- |
 | 1 | mixed_beacon_sequence_anomaly | beacon_management_anomaly | yes | 0.000 | WIDS-BEACON-001, WIDS-BEACON-002, WIDS-BEACON-003 | none |
-| 1 | mixed_deauth_burst | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-001, WIDS-DEAUTH-002, WIDS-DEAUTH-003, WIDS-DEAUTH-004 | none |
+| 1 | mixed_deauth_burst | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-001, WIDS-DEAUTH-002, WIDS-DEAUTH-003, WIDS-DEAUTH-004, WIDS-DEAUTH-005, WIDS-DEAUTH-006 | none |
 | 1 | mixed_evil_twin | evil_twin_rogue_ap | yes | 0.000 | WIDS-EVIL-001, WIDS-EVIL-002, WIDS-EVIL-003, WIDS-EVIL-004 | none |
 | 1 | mixed_evil_twin_matching_oui | evil_twin_rogue_ap | yes | 0.000 | WIDS-EVIL-001, WIDS-EVIL-002 | none |
 | 1 | mixed_karma_probe_responses | probe_response_karma | yes | 0.030 | WIDS-KARMA-001, WIDS-KARMA-002 | none |
-| 1 | mixed_low_slow_deauth | deauth_disassoc_anomaly | no | n/a | none | none |
+| 1 | mixed_low_slow_deauth | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-005, WIDS-DEAUTH-006 | none |
 | 2 | mixed_beacon_sequence_anomaly | beacon_management_anomaly | yes | 0.000 | WIDS-BEACON-001, WIDS-BEACON-002, WIDS-BEACON-003 | none |
-| 2 | mixed_deauth_burst | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-001, WIDS-DEAUTH-002, WIDS-DEAUTH-003, WIDS-DEAUTH-004 | none |
+| 2 | mixed_deauth_burst | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-001, WIDS-DEAUTH-002, WIDS-DEAUTH-003, WIDS-DEAUTH-004, WIDS-DEAUTH-005, WIDS-DEAUTH-006 | none |
 | 2 | mixed_evil_twin | evil_twin_rogue_ap | yes | 0.000 | WIDS-EVIL-001, WIDS-EVIL-002, WIDS-EVIL-003, WIDS-EVIL-004 | none |
 | 2 | mixed_evil_twin_matching_oui | evil_twin_rogue_ap | yes | 0.000 | WIDS-EVIL-001, WIDS-EVIL-002 | none |
 | 2 | mixed_karma_probe_responses | probe_response_karma | yes | 0.030 | WIDS-KARMA-001, WIDS-KARMA-002 | none |
-| 2 | mixed_low_slow_deauth | deauth_disassoc_anomaly | no | n/a | none | none |
+| 2 | mixed_low_slow_deauth | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-005, WIDS-DEAUTH-006 | none |
 | 3 | mixed_beacon_sequence_anomaly | beacon_management_anomaly | yes | 0.000 | WIDS-BEACON-001, WIDS-BEACON-002, WIDS-BEACON-003 | none |
-| 3 | mixed_deauth_burst | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-001, WIDS-DEAUTH-002, WIDS-DEAUTH-003, WIDS-DEAUTH-004 | none |
+| 3 | mixed_deauth_burst | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-001, WIDS-DEAUTH-002, WIDS-DEAUTH-003, WIDS-DEAUTH-004, WIDS-DEAUTH-005, WIDS-DEAUTH-006 | none |
 | 3 | mixed_evil_twin | evil_twin_rogue_ap | yes | 0.000 | WIDS-EVIL-001, WIDS-EVIL-002, WIDS-EVIL-003, WIDS-EVIL-004 | none |
 | 3 | mixed_evil_twin_matching_oui | evil_twin_rogue_ap | yes | 0.000 | WIDS-EVIL-001, WIDS-EVIL-002, WIDS-EVIL-004 | none |
 | 3 | mixed_karma_probe_responses | probe_response_karma | yes | 0.030 | WIDS-KARMA-001, WIDS-KARMA-002 | none |
-| 3 | mixed_low_slow_deauth | deauth_disassoc_anomaly | no | n/a | none | none |
+| 3 | mixed_low_slow_deauth | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-005, WIDS-DEAUTH-006 | none |
 | 42 | mixed_beacon_sequence_anomaly | beacon_management_anomaly | yes | 0.000 | WIDS-BEACON-001, WIDS-BEACON-002, WIDS-BEACON-003 | none |
-| 42 | mixed_deauth_burst | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-001, WIDS-DEAUTH-002, WIDS-DEAUTH-003, WIDS-DEAUTH-004 | none |
+| 42 | mixed_deauth_burst | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-001, WIDS-DEAUTH-002, WIDS-DEAUTH-003, WIDS-DEAUTH-004, WIDS-DEAUTH-005, WIDS-DEAUTH-006 | none |
 | 42 | mixed_evil_twin | evil_twin_rogue_ap | yes | 0.000 | WIDS-EVIL-001, WIDS-EVIL-002, WIDS-EVIL-003, WIDS-EVIL-004 | none |
 | 42 | mixed_evil_twin_matching_oui | evil_twin_rogue_ap | yes | 0.000 | WIDS-EVIL-001, WIDS-EVIL-002 | none |
 | 42 | mixed_karma_probe_responses | probe_response_karma | yes | 0.030 | WIDS-KARMA-001, WIDS-KARMA-002 | none |
-| 42 | mixed_low_slow_deauth | deauth_disassoc_anomaly | no | n/a | none | none |
+| 42 | mixed_low_slow_deauth | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-005, WIDS-DEAUTH-006 | none |
 | 99 | mixed_beacon_sequence_anomaly | beacon_management_anomaly | yes | 0.000 | WIDS-BEACON-001, WIDS-BEACON-002, WIDS-BEACON-003 | none |
-| 99 | mixed_deauth_burst | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-001, WIDS-DEAUTH-002, WIDS-DEAUTH-003, WIDS-DEAUTH-004 | none |
+| 99 | mixed_deauth_burst | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-001, WIDS-DEAUTH-002, WIDS-DEAUTH-003, WIDS-DEAUTH-004, WIDS-DEAUTH-005, WIDS-DEAUTH-006 | none |
 | 99 | mixed_evil_twin | evil_twin_rogue_ap | yes | 0.000 | WIDS-EVIL-001, WIDS-EVIL-002, WIDS-EVIL-003, WIDS-EVIL-004 | none |
 | 99 | mixed_evil_twin_matching_oui | evil_twin_rogue_ap | yes | 0.000 | WIDS-EVIL-001, WIDS-EVIL-002, WIDS-EVIL-004 | none |
 | 99 | mixed_karma_probe_responses | probe_response_karma | yes | 0.030 | WIDS-KARMA-001, WIDS-KARMA-002 | none |
-| 99 | mixed_low_slow_deauth | deauth_disassoc_anomaly | no | n/a | none | none |
+| 99 | mixed_low_slow_deauth | deauth_disassoc_anomaly | yes | 0.000 | WIDS-DEAUTH-005, WIDS-DEAUTH-006 | none |
 
 ## Benign false-positive rate
 
@@ -88,11 +102,11 @@ Each benign scenario is 12 minutes long. Informational ML-only alerts are exclud
 
 | Seed | Benign alerts per hour |
 | ---: | ---: |
-| 1 | 2.500 |
-| 2 | 5.000 |
+| 1 | 0.000 |
+| 2 | 0.000 |
 | 3 | 0.000 |
 | 42 | 0.000 |
-| 99 | 2.500 |
+| 99 | 0.000 |
 
 ## Rules versus rules plus ML
 
@@ -101,7 +115,7 @@ ML is a low-weight supporting signal. Informational-only ML output is reported s
 | Family | Cases | Rules only | Rules plus ML | ML-only actionable added | ML informational cases |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | evil_twin_rogue_ap | 10 | 10 | 10 | 0 | 0 |
-| deauth_disassoc_anomaly | 10 | 5 | 5 | 0 | 5 |
+| deauth_disassoc_anomaly | 10 | 10 | 10 | 0 | 0 |
 | probe_response_karma | 5 | 5 | 5 | 0 | 0 |
 | beacon_management_anomaly | 5 | 5 | 5 | 0 | 0 |
 
@@ -131,12 +145,14 @@ ML is a low-weight supporting signal. It never supplies a standalone verdict.
 | Rule | Incidents | Benign incidents | Scenarios |
 | --- | ---: | ---: | --- |
 | WIDS-BEACON-001 | 10 | 0 | beacon_sequence_anomaly, mixed_beacon_sequence_anomaly |
-| WIDS-BEACON-002 | 14 | 4 | beacon_sequence_anomaly, benign_noisy, mixed_beacon_sequence_anomaly |
+| WIDS-BEACON-002 | 10 | 0 | beacon_sequence_anomaly, mixed_beacon_sequence_anomaly |
 | WIDS-BEACON-003 | 10 | 0 | beacon_sequence_anomaly, mixed_beacon_sequence_anomaly |
 | WIDS-DEAUTH-001 | 10 | 0 | deauth_burst, mixed_deauth_burst |
 | WIDS-DEAUTH-002 | 10 | 0 | deauth_burst, mixed_deauth_burst |
 | WIDS-DEAUTH-003 | 10 | 0 | deauth_burst, mixed_deauth_burst |
 | WIDS-DEAUTH-004 | 10 | 0 | deauth_burst, mixed_deauth_burst |
+| WIDS-DEAUTH-005 | 20 | 0 | deauth_burst, low_slow_deauth, mixed_deauth_burst, mixed_low_slow_deauth |
+| WIDS-DEAUTH-006 | 20 | 0 | deauth_burst, low_slow_deauth, mixed_deauth_burst, mixed_low_slow_deauth |
 | WIDS-EVIL-001 | 18 | 0 | mixed_evil_twin, mixed_evil_twin_matching_oui |
 | WIDS-EVIL-002 | 18 | 0 | mixed_evil_twin, mixed_evil_twin_matching_oui |
 | WIDS-EVIL-003 | 10 | 0 | mixed_evil_twin |
@@ -150,24 +166,26 @@ Full rules pipeline, best of 2 runs, with the 12-minute benign PCAP.
 
 | Frames | Best seconds | Frames per second | Peak memory MB |
 | ---: | ---: | ---: | ---: |
-| 2207 | 6.311 | 349.68 | 149.25 |
+| 2207 | 7.323 | 301.40 | 180.34 |
 
-Peak memory is measured with the Windows process working-set API. ML scoring is
-evaluated separately by `tools/eval_ml.py`; the throughput table covers parsing,
-windowing, feature extraction, rules, and correlation.
+Peak memory is measured with the Windows process working-set API or the
+Unix `resource` module. ML scoring is evaluated separately by
+`tools/eval_ml.py`; the throughput table covers parsing, windowing,
+feature extraction, rules, and correlation.
 
 The direct benchmark command used for validation:
 
 ```powershell
-.\.venv\Scripts\python.exe tools\benchmark.py --pcap .tmp\m10-eval-final\artifacts\benign_baseline.pcap --repeat 3
+.\.venv\Scripts\python.exe tools\benchmark.py --repeat 3
 ```
 
 ## Challenge findings
 
 - `benign_noisy` includes legitimate roaming, an AP restart, and a new AP. Actionable
   alerts are reported above and are not hidden.
-- `mixed_low_slow_deauth` contains 12 deauth frames over 132 seconds. If missed,
-  the table and recall show the miss. Thresholds were not lowered to make it pass.
+- `mixed_low_slow_deauth` contains 12 deauth frames over 132 seconds. Both
+  cumulative 300-second rules detected it on every seed with zero benign/noisy
+  false positives. Thresholds were not lowered to force a result.
 - `mixed_evil_twin_matching_oui` uses the trusted OUI and channel. Remaining
   duplicate-SSID or RSSI evidence is reported per scenario.
 

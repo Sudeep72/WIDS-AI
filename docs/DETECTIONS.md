@@ -110,6 +110,12 @@ must be verified at attack.mitre.org.
 - `WIDS-DEAUTH-004`: at least 6 deauth frames with a dominant reason code and at
   least 2 reason codes. Severity medium. False positives include normal client
   disconnect patterns.
+- `WIDS-DEAUTH-005`: rolling 300-second cumulative deauth count from one BSSID
+  reaches 6. Severity high. Benign and noisy benign have zero deauth frames in
+  the synthetic baseline, so the threshold was not lowered from the existing
+  burst boundary. Revalidate on real trusted baseline data.
+- `WIDS-DEAUTH-006`: rolling 300-second cumulative deauth count to one client
+  reaches 6. Severity high. Repeated reconnect attempts can still trigger it.
 
 ### Probe response and KARMA style
 
@@ -122,8 +128,10 @@ must be verified at attack.mitre.org.
 
 - `WIDS-BEACON-001`: beacon interval standard deviation of at least 50 ms with at
   least 3 beacons. Severity high. False positives include packet loss.
-- `WIDS-BEACON-002`: at least 2 duplicate sequence numbers or 3 sequence gaps.
-  Severity high. False positives include retransmissions and firmware resets.
+- `WIDS-BEACON-002`: at least 2 duplicate sequence numbers or 2 sequence gaps,
+  with trusted restart gaps suppressed when no duplicate stream or timing anomaly
+  is present. Severity high. Unknown BSSIDs and interleaved duplicate streams still
+  fire.
 - `WIDS-BEACON-003`: beacon interval jitter of at least 20 ms with at least
   3 beacons. Severity medium. False positives include channel changes and packet
   loss in short windows.
@@ -201,3 +209,25 @@ sentence-boundary truncation only for display.
   `SSID shared with untrusted AP`. Their trust remains unchanged unless separate
   evidence justifies a reduction.
 - Trusted APs with no such evidence are `Trusted`.
+
+
+## Rolling deauth aggregation
+
+`WIDS-DEAUTH-005` and `WIDS-DEAUTH-006` use `aggregation: rolling`. The rule
+engine evaluates a trailing 300-second deque per BSSID or client, emits at most one
+detection per entity per capture, and records the cumulative count and window
+boundaries in evidence. These rules do not reuse a 10-second feature row.
+
+The threshold of 6 was chosen from the synthetic benign distribution, where the
+baseline and noisy-benign captures contain no deauthorization frames. The M11
+five-seed evaluation reports zero benign/noisy alerts and detects the spread
+`mixed_low_slow_deauth` scenario with both rules. Revalidate on authorized real
+captures before operational use.
+
+## Trusted restart suppression
+
+For `WIDS-BEACON-002`, a BSSID present in the trusted inventory is not flagged for
+a gap-only sequence pattern when duplicate count is zero and beacon interval
+standard deviation and jitter remain below the other beacon anomaly thresholds.
+Unknown BSSIDs, duplicate interleaved streams, and combined timing anomalies are
+still evaluated normally.
