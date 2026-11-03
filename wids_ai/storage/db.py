@@ -14,7 +14,7 @@ from typing import Any
 from wids_ai.correlation.schema import Alert
 from wids_ai.inventory import APInventory
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DDL = (
     """
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -174,8 +174,14 @@ class Database:
                 )
                 connection.commit()
 
-    def start_run(self, source: str) -> int:
+    def start_run(self, source: str, fresh: bool = False) -> int:
         with self.transaction() as connection:
+            if fresh:
+                connection.execute("DELETE FROM ml_scores")
+                connection.execute("DELETE FROM alerts")
+                connection.execute("DELETE FROM incidents")
+                connection.execute("DELETE FROM frame_summaries")
+                connection.execute("DELETE FROM aps")
             cursor = connection.execute(
                 "INSERT INTO runs(started_at, source, status) VALUES (?, ?, 'running')",
                 (datetime.now(tz=UTC).isoformat(), source),
@@ -303,36 +309,79 @@ class Database:
         row = self.connection().execute("SELECT COUNT(*) AS count FROM frame_summaries").fetchone()
         return int(row["count"])
 
-    def get_stats(self) -> dict[str, Any]:
+    def latest_run(self) -> dict[str, Any] | None:
+        row = (
+            self.connection()
+            .execute(
+                "SELECT id, started_at, finished_at, source, frame_count, window_count, status "
+                "FROM runs ORDER BY id DESC LIMIT 1"
+            )
+            .fetchone()
+        )
+        return dict(row) if row else None
+
+    def get_stats(self, run: str = "latest") -> dict[str, Any]:
         connection = self.connection()
-        frame_row = connection.execute(
-            "SELECT COALESCE(SUM(frame_count), 0) AS frames FROM runs"
-        ).fetchone()
-        frame_count = int(frame_row["frames"] or 0)
-        run_rows = connection.execute(
-            "SELECT COALESCE(SUM(window_count), 0) AS windows FROM runs"
-        ).fetchone()
-        severity = connection.execute(
-            "SELECT severity, COUNT(*) AS count FROM alerts GROUP BY severity ORDER BY severity"
-        ).fetchall()
-        family = connection.execute(
-            "SELECT family, COUNT(*) AS count FROM alerts GROUP BY family ORDER BY family"
-        ).fetchall()
-        ml = connection.execute(
-            """
-            SELECT timestamp, json_extract(payload_json, '$.ml_anomaly_score') AS score
-            FROM alerts ORDER BY timestamp DESC LIMIT 30
-            """
-        ).fetchall()
+        latest = self.latest_run()
+        run_id = int(latest["id"]) if latest is not None else None
+        if run == "all":
+            frame_row = connection.execute(
+                "SELECT COALESCE(SUM(frame_count), 0) AS frames FROM runs"
+            ).fetchone()
+            window_row = connection.execute(
+                "SELECT COALESCE(SUM(window_count), 0) AS windows FROM runs"
+            ).fetchone()
+            severity = connection.execute(
+                "SELECT severity, COUNT(*) AS count FROM alerts GROUP BY severity ORDER BY severity"
+            ).fetchall()
+            family = connection.execute(
+                "SELECT family, COUNT(*) AS count FROM alerts GROUP BY family ORDER BY family"
+            ).fetchall()
+            ml_rows = connection.execute(
+                "SELECT window_start, score FROM ml_scores ORDER BY window_start"
+            ).fetchall()
+        elif run_id is None:
+            frame_row = {"frames": 0}
+            window_row = {"windows": 0}
+            severity = []
+            family = []
+            ml_rows = []
+        else:
+            frame_row = connection.execute(
+                "SELECT frame_count AS frames FROM runs WHERE id = ?", (run_id,)
+            ).fetchone()
+            window_row = connection.execute(
+                "SELECT window_count AS windows FROM runs WHERE id = ?", (run_id,)
+            ).fetchone()
+            severity = connection.execute(
+                "SELECT severity, COUNT(*) AS count FROM alerts WHERE run_id = ? "
+                "GROUP BY severity ORDER BY severity",
+                (run_id,),
+            ).fetchall()
+            family = connection.execute(
+                "SELECT family, COUNT(*) AS count FROM alerts WHERE run_id = ? "
+                "GROUP BY family ORDER BY family",
+                (run_id,),
+            ).fetchall()
+            ml_rows = connection.execute(
+                "SELECT window_start, score FROM ml_scores WHERE run_id = ? ORDER BY window_start",
+                (run_id,),
+            ).fetchall()
+        ml_points = [
+            {"timestamp": row["window_start"], "score": float(row["score"] or 0.0)}
+            for row in ml_rows
+        ]
+        if len(ml_points) > 200:
+            stride = (len(ml_points) + 199) // 200
+            ml_points = ml_points[::stride][:200]
         return {
-            "frames_processed": int(frame_count),
-            "windows": int(run_rows["windows"] or 0),
+            "frames_processed": int(frame_row["frames"] or 0),
+            "windows": int(window_row["windows"] or 0),
             "alerts_by_severity": {row["severity"]: row["count"] for row in severity},
             "alerts_by_family": {row["family"]: row["count"] for row in family},
-            "latest_ml_scores": [
-                {"timestamp": row["timestamp"], "score": float(row["score"] or 0.0)}
-                for row in reversed(ml)
-            ],
+            "latest_ml_scores": ml_points,
+            "run_id": run_id,
+            "run_started_at": latest["started_at"] if latest and run != "all" else None,
         }
 
     def list_alerts(

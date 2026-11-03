@@ -67,6 +67,7 @@ def replay_pcap(
     step_seconds: float = 5.0,
     speed: float = 20.0,
     loop: bool = False,
+    fresh: bool = True,
     sleep: bool = True,
 ) -> ReplayResult:
     """Replay a PCAP and persist alerts as each simulated window closes."""
@@ -121,7 +122,7 @@ def replay_pcap(
             inventory.adjust_trust(bssid, -10)
         elif duplicate:
             flag_reasons[bssid] = "SSID shared with untrusted AP"
-    run_id = database.start_run(str(source))
+    run_id = database.start_run(str(source), fresh=fresh)
     database.save_inventory(inventory, flagged, flag_reasons)
     if sleep and speed > 0:
         simulated = (frame_rows[-1].timestamp - frame_rows[0].timestamp).total_seconds()

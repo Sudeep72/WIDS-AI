@@ -73,6 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--rules", type=Path, default=Path("wids_ai/rules/rules"))
             command.add_argument("--db", type=Path, default=Path("data/wids.db"))
             command.add_argument("--loop", action="store_true")
+            command.add_argument("--fresh", dest="fresh", action="store_true", default=True)
+            command.add_argument("--keep", dest="fresh", action="store_false")
         if name == "score":
             command.add_argument("pcap", type=Path)
             command.add_argument("--model", type=Path, required=True)
@@ -221,6 +223,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 trusted_model_root=args.trusted_model_root,
                 speed=args.speed,
                 loop=args.loop,
+                fresh=args.fresh,
             )
             print(
                 f"Replay: {result.frames} frames, {result.windows} feature rows, {result.alerts} alerts"

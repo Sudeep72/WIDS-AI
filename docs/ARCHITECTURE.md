@@ -97,8 +97,9 @@ carries CSP `default-src 'self'`, `X-Content-Type-Options: nosniff`,
 `X-Frame-Options: DENY`, and `Referrer-Policy: no-referrer`.
 
 - `GET /api/health` returns `{"status":"ok","schema_version":1}`.
-- `GET /api/stats` returns frame and window counts, alert counts by severity and
-  family, and the latest ML score samples.
+- `GET /api/stats?run=latest` returns latest-run frame and window counts, alerts by
+  severity and family, run id and start time, and up to 200 time-ordered ML score
+  samples. Use `run=all` for cumulative totals.
 - `GET /api/aps` returns SSID, BSSID, vendor OUI, channels, RSSI, security, trust
   score, and flagged state.
 - `GET /api/alerts?severity=&family=&since=&limit=50&offset=0` returns alert JSON.
@@ -107,5 +108,18 @@ carries CSP `default-src 'self'`, `X-Content-Type-Options: nosniff`,
 - `GET /api/alerts/{id}` returns full evidence, indicators found and not found,
   why text, and the ATT&CK mapping.
 
+Alert evidence and indicator objects use the same contract: `field`, `observed`,
+`threshold`, `operator`, `text`, and `rule_ids`. The dashboard reads those fields
+from the Pydantic response model. `serve --replay` uses `--fresh` by default to
+clear previous alerts, APs and ML scores; `--keep` retains those records.
+
 SSIDs and other frame-derived strings are control-character stripped and truncated
 in the API and rendered with `textContent` in the dashboard.
+
+
+## Run-scoped replay
+
+Replay statistics default to the latest run. Cumulative statistics are available
+with `/api/stats?run=all`. A fresh replay clears alerts, APs, incidents, frame
+summaries, and the ML score series before creating a new run, preventing double
+counting when the same PCAP is replayed.

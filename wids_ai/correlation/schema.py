@@ -61,8 +61,8 @@ class Alert(BaseModel):
     ml_anomaly_score: float = Field(ge=0.0, le=1.0)
     why: str
     reasons: list[CorrelationReason] = Field(default_factory=list)
-    indicators_found: list[Indicator] = Field(default_factory=list)
-    indicators_not_found: list[Indicator] = Field(default_factory=list)
+    indicators_found: list[Evidence] = Field(default_factory=list)
+    indicators_not_found: list[Evidence] = Field(default_factory=list)
     recommended_check: str
     bssids: tuple[str, ...] = ()
     ssids: tuple[str, ...] = ()

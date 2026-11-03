@@ -164,5 +164,5 @@ def test_not_fired_indicators_use_evaluated_values() -> None:
     alert = score_group([incident], 0.2, _inventory())
     assert alert.indicators_not_found
     assert alert.indicators_not_found[0].field == "channel_mismatch"
-    assert alert.indicators_not_found[0].observed == "0"
-    assert alert.indicators_not_found[0].expected == "1"
+    assert alert.indicators_not_found[0].observed == 0
+    assert alert.indicators_not_found[0].threshold == 1

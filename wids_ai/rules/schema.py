@@ -85,6 +85,7 @@ class Evidence(BaseModel):
     field: str
     observed: Any
     threshold: Any
+    operator: str | None = None
     text: str
     rule_ids: tuple[str, ...] = ()
 

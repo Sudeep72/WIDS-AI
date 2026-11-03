@@ -71,7 +71,7 @@ def test_db_round_trip_and_migration(tmp_path: Path) -> None:
     assert db.get_stats()["frames_processed"] == 10
     with sqlite3.connect(tmp_path / "wids.db") as connection:
         version = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
-    assert version == 2
+    assert version == 3
 
 
 def test_api_endpoints_and_security_headers(tmp_path: Path) -> None:
@@ -144,7 +144,7 @@ def test_dashboard_assets_have_no_external_urls_or_dangerous_sinks() -> None:
     assert "/static/app.js" in html
     assert "/static/style.css" in html
     assert "section + section" in css
-    assert "No ML score data" in js
+    assert "Not enough ML score data" in js
     assert "dBm" in js
     assert "sentenceTruncate" in js
 
@@ -262,12 +262,20 @@ def test_replay_ap_state_frames_and_sparkline(tmp_path: Path, synthetic_dataset)
         if (frame := parse_frame(packet)) is not None
     ]
     APInventory.from_frames(benign_frames).save(inventory_path)
+    from wids_ai.ml.baseline import load_benign_rows
+    from wids_ai.ml.isolation_forest import train_isolation_forest
+
+    model_root = tmp_path / "models"
+    benign_rows = load_benign_rows(dataset / "benign_baseline.pcap")
+    for scope in ("bssid", "client", "ssid"):
+        scope_rows = [row for row in benign_rows if row.scope == scope]
+        train_isolation_forest(scope_rows, model_root, seed=42)
     db = Database(tmp_path / "ap.db")
     result = replay_pcap(
         dataset / "mixed_evil_twin.pcap",
         db,
         inventory_path=inventory_path,
-        model_root=tmp_path / "models",
+        model_root=model_root,
         trusted_model_root=tmp_path,
         sleep=False,
     )
@@ -283,8 +291,16 @@ def test_replay_ap_state_frames_and_sparkline(tmp_path: Path, synthetic_dataset)
     assert aps["02:de:ad:be:ef:01"]["status"] == "Flagged"
     stats = client.get("/api/stats").json()
     assert stats["frames_processed"] == result.frames
-    assert stats["latest_ml_scores"]
-    assert all(0.0 <= item["score"] <= 1.0 for item in stats["latest_ml_scores"])
+    score_series = stats["latest_ml_scores"]
+    assert len(score_series) > 50
+    assert len(score_series) <= 200
+    timestamps = [item["timestamp"] for item in score_series]
+    assert timestamps == sorted(timestamps)
+    assert all(0.0 <= item["score"] <= 1.0 for item in score_series)
+    alert = client.get("/api/alerts?limit=1").json()[0]
+    alert_start = alert["first_seen"]
+    alert_end = alert["last_seen"]
+    assert any(alert_start <= item["timestamp"] <= alert_end for item in score_series)
     alert = client.get("/api/alerts?limit=1").json()[0]
     assert len(alert["evidence"]) == len({item["field"] for item in alert["evidence"]})
     assert any(item.get("rule_ids") for item in alert["evidence"])
@@ -341,3 +357,121 @@ def test_legacy_security_list_is_read_as_single_mode(tmp_path: Path) -> None:
     row = db.list_aps()[0]
     assert row["security"] == "wep"
     assert row["rssi"] == -40.0
+
+
+@pytest.mark.slow
+def test_replaying_same_capture_keeps_latest_run_counts(tmp_path: Path, synthetic_dataset) -> None:
+    from wids_ai.capture.base import PcapSource
+    from wids_ai.parser.dot11 import parse_frame
+    from wids_ai.replay import replay_pcap
+
+    dataset = synthetic_dataset(42)
+    inventory_path = tmp_path / "inventory.json"
+    benign_frames = [
+        frame
+        for packet in PcapSource(dataset / "benign_baseline.pcap").packets()
+        if (frame := parse_frame(packet)) is not None
+    ]
+    APInventory.from_frames(benign_frames).save(inventory_path)
+    db = Database(tmp_path / "repeat.db")
+    first = replay_pcap(
+        dataset / "mixed_evil_twin.pcap",
+        db,
+        inventory_path=inventory_path,
+        model_root=tmp_path / "missing-models",
+        trusted_model_root=tmp_path,
+        sleep=False,
+    )
+    second = replay_pcap(
+        dataset / "mixed_evil_twin.pcap",
+        db,
+        inventory_path=inventory_path,
+        model_root=tmp_path / "missing-models",
+        trusted_model_root=tmp_path,
+        sleep=False,
+        fresh=False,
+    )
+    latest_stats = db.get_stats()
+    all_stats = db.get_stats("all")
+    assert first.frames == second.frames
+    assert latest_stats["frames_processed"] == second.frames
+    assert latest_stats["windows"] == second.windows
+    assert all_stats["frames_processed"] == first.frames + second.frames
+    assert all_stats["windows"] == first.windows + second.windows
+
+
+def test_ui_alert_contract_fields_exist(tmp_path: Path) -> None:
+    from fastapi.testclient import TestClient
+
+    from wids_ai.api.main import create_app
+
+    db = Database(tmp_path / "contract.db")
+    alert = _alert()
+    alert = alert.model_copy(
+        update={
+            "evidence": [
+                Evidence(
+                    field="channel_mismatch",
+                    observed=1,
+                    threshold=1,
+                    operator="eq",
+                    text="channel_mismatch was 1, expected eq 1",
+                )
+            ],
+            "indicators_found": [
+                Evidence(
+                    field="channel_mismatch",
+                    observed=1,
+                    threshold=1,
+                    operator="eq",
+                    text="channel_mismatch was 1, expected eq 1",
+                )
+            ],
+        }
+    )
+    db.save_alert(alert)
+    payload = TestClient(create_app(db)).get("/api/alerts/ALT-1").json()
+    evidence = payload["evidence"][0]
+    for field in ("field", "observed", "threshold", "operator", "text"):
+        assert field in evidence
+    assert "threshold" in payload["indicators_found"][0]
+
+
+@pytest.mark.skipif(
+    __import__("shutil").which("node") is None,
+    reason="node is not on PATH; dashboard DOM test skipped",
+)
+def test_dashboard_dom_stub_behavior() -> None:
+    import subprocess
+
+    root = Path(__file__).resolve().parent.parent
+    result = subprocess.run(
+        ["node", str(root / "tests" / "dashboard_dom_stub.js")],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert "DOM_STUB_TESTS_PASS" in result.stdout
+
+
+def test_ui_evidence_fields_match_response_model() -> None:
+    from wids_ai.api.main import AlertResponse
+
+    fields = set(AlertResponse.model_fields)
+    for name in (
+        "id",
+        "timestamp",
+        "family",
+        "severity",
+        "risk_score",
+        "evidence",
+        "indicators_found",
+        "indicators_not_found",
+        "why",
+        "mitre_attack",
+    ):
+        assert name in fields
+    evidence_fields = {"field", "observed", "threshold", "operator", "text"}
+    from wids_ai.rules.schema import Evidence
+
+    assert evidence_fields <= set(Evidence.model_fields)

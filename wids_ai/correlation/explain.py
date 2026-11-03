@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from wids_ai.correlation.schema import Indicator
 from wids_ai.rules.schema import Evidence
 
 
@@ -14,27 +13,11 @@ def build_explanation(
     ssids: tuple[str, ...],
     clients: tuple[str, ...],
     ml_score: float,
-) -> tuple[str, list[Indicator], list[Indicator], str]:
+) -> tuple[str, list[Evidence], list[Evidence], str]:
     """Build an explanation from deduplicated evaluated evidence only."""
-    found = [
-        Indicator(
-            field=item.field,
-            observed=str(item.observed),
-            expected=str(item.threshold),
-            meaning=item.text,
-        )
-        for item in evidence
-    ]
-    not_found = [
-        Indicator(
-            field=item.field,
-            observed=str(item.observed),
-            expected=str(item.threshold),
-            meaning=item.text,
-        )
-        for item in not_fired_evidence
-        if item.field not in {found_item.field for found_item in found}
-    ]
+    found = list(evidence)
+    found_fields = {item.field for item in evidence}
+    not_found = [item for item in not_fired_evidence if item.field not in found_fields]
     entities = []
     if bssids:
         entities.append("BSSIDs " + ", ".join(bssids))

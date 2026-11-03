@@ -47,6 +47,8 @@ class StatsResponse(BaseModel):
     alerts_by_severity: dict[str, int]
     alerts_by_family: dict[str, int]
     latest_ml_scores: list[dict[str, Any]]
+    run_id: int | None = None
+    run_started_at: str | None = None
 
 
 class APResponse(BaseModel):
@@ -102,8 +104,13 @@ def create_app(database: Database | None = None) -> FastAPI:
         return HealthResponse(status="ok", schema_version=1)
 
     @app.get("/api/stats", response_model=StatsResponse)
-    def stats(db: Annotated[Database, Depends(get_database)]) -> dict[str, Any]:
-        return sanitize_payload(db.get_stats())
+    def stats(
+        db: Annotated[Database, Depends(get_database)],
+        run: Annotated[Literal["latest", "all"], Query()] = "latest",
+    ) -> dict[str, Any]:
+        if run not in {"latest", "all"}:
+            raise HTTPException(status_code=422, detail="run must be latest or all")
+        return sanitize_payload(db.get_stats(run))
 
     @app.get("/api/aps", response_model=list[APResponse])
     def aps(db: Annotated[Database, Depends(get_database)]) -> list[dict[str, Any]]:

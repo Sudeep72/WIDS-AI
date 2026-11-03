@@ -240,6 +240,7 @@ def _not_fired_evidence(
             field=condition.field,
             observed=observed,
             threshold=condition.value,
+            operator=condition.operator,
             text=f"{condition.field} was {observed!r}, expected {condition.operator} {condition.value!r}",
         )
     ]
@@ -273,6 +274,7 @@ def _evidence_for(
             field=label,
             observed=observed,
             threshold=condition.value,
+            operator=condition.operator,
             text=f"{label} was {observed!r}, expected {condition.operator} {condition.value!r}",
         )
     ]
