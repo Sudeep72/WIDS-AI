@@ -7,14 +7,10 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from wids_ai.capture.base import PcapSource
-from wids_ai.correlation.scorer import CorrelationConfig, correlate
-from wids_ai.features.extractors import FeatureRow, extract_features
-from wids_ai.features.windowing import WindowConfig
+from wids_ai.correlation.scorer import CorrelationConfig
 from wids_ai.inventory import APInventory
-from wids_ai.ml.isolation_forest import aggregate_window_scores, load_model, score_rows
-from wids_ai.parser.dot11 import parse_frame
-from wids_ai.rules.engine import deduplicate, evaluate_rules, load_rules
+from wids_ai.pipeline import analyze_frames, parse_pcap
+from wids_ai.rules.engine import load_rules
 from wids_ai.storage.db import Database
 
 LOGGER = logging.getLogger(__name__)
@@ -25,34 +21,6 @@ class ReplayResult:
     frames: int
     windows: int
     alerts: int
-
-
-def _score_alerts(
-    incidents,
-    feature_rows: list[FeatureRow],
-    model_root: Path,
-    inventory: APInventory,
-    trusted_model_root: Path,
-    correlation_config: CorrelationConfig,
-):
-    ml_scores = []
-    for scope in ("bssid", "client", "ssid"):
-        model_dir = model_root / scope
-        if not (model_dir / "isolation_forest.joblib").is_file():
-            continue
-        model = load_model(model_dir, trusted_base=trusted_model_root)
-        scope_rows = [row for row in feature_rows if row.scope == scope]
-        if not scope_rows:
-            continue
-        scope_scores = score_rows(model, scope_rows)
-        ml_scores.extend(aggregate_window_scores(scope_scores, method="max"))
-    alerts = correlate(
-        incidents,
-        [item.anomaly_score for item in ml_scores],
-        inventory,
-        correlation_config,
-    )
-    return alerts, ml_scores
 
 
 def replay_pcap(
@@ -73,38 +41,28 @@ def replay_pcap(
 ) -> ReplayResult:
     """Replay a PCAP and persist alerts as each simulated window closes."""
     source = Path(pcap)
+    frame_rows = parse_pcap(source)
+    if not frame_rows:
+        return ReplayResult(frames=0, windows=0, alerts=0)
     inventory = (
         APInventory.load(inventory_path)
         if inventory_path is not None
-        else APInventory.from_frames(
-            frame
-            for packet in PcapSource(source).packets()
-            if (frame := parse_frame(packet)) is not None
-        )
+        else APInventory.from_frames(frame_rows)
     )
-    rules = load_rules(rules_dir)
+    load_rules(rules_dir)
     trusted_root = Path(trusted_model_root) if trusted_model_root is not None else Path(model_root)
-    correlation_config = CorrelationConfig()
-    frame_rows = [
-        frame
-        for packet in PcapSource(source).packets()
-        if (frame := parse_frame(packet)) is not None
-    ]
-    if not frame_rows:
-        return ReplayResult(frames=0, windows=0, alerts=0)
-    feature_frame = extract_features(frame_rows, WindowConfig(window_seconds, step_seconds))
-    feature_rows = [
-        FeatureRow.model_validate(item.to_dict()) for _, item in feature_frame.iterrows()
-    ]
-    incidents = deduplicate(evaluate_rules(feature_rows, rules, frame_rows, inventory))
-    alerts, ml_scores = _score_alerts(
-        incidents,
-        feature_rows,
-        Path(model_root),
+    result = analyze_frames(
+        frame_rows,
         inventory,
-        trusted_root,
-        correlation_config,
+        rules_dir=rules_dir,
+        model_root=model_root,
+        trusted_model_root=trusted_root,
+        window_seconds=window_seconds,
+        step_seconds=step_seconds,
+        correlation_config=CorrelationConfig(),
     )
+    alerts = list(result.alerts)
+    ml_scores = list(result.ml_scores)
     inventory.observe_frames(frame_rows)
     flagged: set[str] = set()
     flag_reasons: dict[str, str] = {}
@@ -151,6 +109,6 @@ def replay_pcap(
             on_alerts(alerts)
         except Exception as exc:
             LOGGER.warning("Downstream alert handler failed: %s", type(exc).__name__)
-    database.finish_run(run_id, len(frame_rows), len(feature_rows))
+    database.finish_run(run_id, len(frame_rows), result.window_count)
     LOGGER.info("Replay wrote %d alerts from %d frames", len(alerts), len(frame_rows))
-    return ReplayResult(frames=len(frame_rows), windows=len(feature_rows), alerts=len(alerts))
+    return ReplayResult(frames=len(frame_rows), windows=result.window_count, alerts=len(alerts))

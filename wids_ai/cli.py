@@ -12,22 +12,21 @@ from wids_ai import __version__
 from wids_ai.capture.base import PcapSource
 from wids_ai.capture.live_source import LiveSource
 from wids_ai.config import PROJECT_ROOT, Settings, load_config
-from wids_ai.correlation.scorer import CorrelationConfig, correlate
-from wids_ai.features.extractors import FeatureRow, batch_extract
+from wids_ai.correlation.scorer import CorrelationConfig
+from wids_ai.features.extractors import batch_extract
 from wids_ai.features.windowing import WindowConfig
 from wids_ai.inventory import APInventory
 from wids_ai.logging_config import configure_logging
 from wids_ai.ml.baseline import load_benign_rows
 from wids_ai.ml.isolation_forest import (
-    aggregate_window_scores,
     load_model,
     score_rows,
     train_isolation_forest,
     write_scores,
 )
 from wids_ai.parser.dot11 import parse_frame
+from wids_ai.pipeline import analyze_frames
 from wids_ai.replay import replay_pcap
-from wids_ai.rules.engine import deduplicate, evaluate_rules, load_rules
 from wids_ai.siem.exporter import FileSink, HttpSink, NanoSIEMExporter
 from wids_ai.storage.db import Database
 
@@ -127,30 +126,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "analyze":
         frame_rows = list(parse_frames(PcapSource(args.pcap)))
-        config = WindowConfig(args.window_seconds, args.step_seconds)
-        feature_frame = batch_extract(frame_rows, config)
-        rows = [FeatureRow.model_validate(item.to_dict()) for _, item in feature_frame.iterrows()]
-        rules = load_rules(args.rules)
         inventory = (
             APInventory.load(args.inventory)
             if args.inventory is not None
             else APInventory.from_frames(frame_rows)
         )
-        detections = evaluate_rules(rows, rules, frame_rows, inventory)
-        incidents = deduplicate(detections)
-        ml_scores = []
-        for scope in ("bssid", "client", "ssid"):
-            model_dir = args.model / scope
-            if not (model_dir / "isolation_forest.joblib").is_file():
-                continue
-            model = load_model(model_dir, trusted_base=args.trusted_model_root)
-            scope_rows = feature_frame[feature_frame["scope"] == scope]
-            scope_scored = score_rows(model, scope_rows)
-            ml_scores.extend(
-                item.anomaly_score for item in aggregate_window_scores(scope_scored, method="max")
-            )
-        correlation_config = CorrelationConfig(**settings.correlation.model_dump())
-        alerts = correlate(incidents, ml_scores, inventory, correlation_config)
+        result = analyze_frames(
+            frame_rows,
+            inventory,
+            rules_dir=args.rules,
+            model_root=args.model,
+            trusted_model_root=args.trusted_model_root,
+            window_seconds=args.window_seconds,
+            step_seconds=args.step_seconds,
+            correlation_config=CorrelationConfig(**settings.correlation.model_dump()),
+        )
+        alerts = list(result.alerts)
+        rows = list(result.feature_rows)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(
             json.dumps([item.model_dump(mode="json") for item in alerts], indent=2) + "\n",

@@ -204,6 +204,12 @@ def load_model(
     trust_root = Path(trusted_base) if trusted_base is not None else DEFAULT_MODELS_DIR
     model_path = _trusted_model_path(directory / MODEL_FILENAME, trust_root)
     metadata_path = directory / METADATA_FILENAME
+    metadata_resolved = metadata_path.expanduser().resolve()
+    root_resolved = Path(trust_root).expanduser().resolve()
+    if root_resolved not in metadata_resolved.parents and metadata_resolved != root_resolved:
+        raise ModelIntegrityError(
+            f"Model path must remain under trusted directory: {root_resolved}"
+        )
     if not model_path.is_file() or not metadata_path.is_file():
         raise FileNotFoundError("Model file and metadata are required")
     metadata = ModelMetadata.model_validate_json(metadata_path.read_text(encoding="utf-8"))

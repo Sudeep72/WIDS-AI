@@ -90,6 +90,13 @@ KARMA_BSSID = "02:00:00:00:10:01"
 KARMA_CLIENTS = ("de:ad:cc:00:00:11", "de:ad:cc:00:00:12")
 BEACON_ATTACK_BSSID = "02:be:ac:00:01:01"
 BEACON_ATTACK_SSID = "LabBeaconAnomaly"
+NOISY_NEW_AP_BSSID = "00:11:22:33:44:88"
+NOISY_NEW_AP_SSID = "LabNewAP"
+NOISY_ROAMING_CLIENT = "aa:bb:cc:00:00:09"
+SLOW_DEAUTH_BSSID = "02:de:ad:de:02:02"
+SLOW_DEAUTH_CLIENT = "de:ad:cc:00:00:02"
+SMART_TWIN_BSSID = "00:11:22:aa:bb:01"
+SMART_TWIN_SSID = "LabNet"
 
 
 def _timestamp(seconds: float) -> datetime:
@@ -167,12 +174,16 @@ def _stamp(packet: object, seconds: float) -> object:
     return packet
 
 
-def _benign(seed: int) -> tuple[list[object], ScenarioLabels]:
+def _benign(
+    seed: int,
+    *,
+    noisy: bool = False,
+    duration: float = BENIGN_DURATION_SECONDS,
+) -> tuple[list[object], ScenarioLabels]:
     rng = random.Random(seed + 1)
     packets: list[object] = []
     sequences = {ap.bssid: 0 for ap in KNOWN_APS}
     next_beacon = {ap.bssid: rng.uniform(0, 0.5) for ap in KNOWN_APS}
-    duration = BENIGN_DURATION_SECONDS
     ssids = [ap.ssid for ap in KNOWN_APS]
     while True:
         active = [ap for ap in KNOWN_APS if next_beacon[ap.bssid] <= duration]
@@ -206,14 +217,18 @@ def _benign(seed: int) -> tuple[list[object], ScenarioLabels]:
                 )
             )
             probe_sequence += 1
+    if noisy:
+        _append_noisy_benign(packets, rng, duration, sequences, probe_sequence)
     packets.sort(key=lambda packet: float(packet.time))
     labels = ScenarioLabels(
-        scenario="benign_baseline",
+        scenario="benign_noisy" if noisy else "benign_baseline",
         attack_family="benign",
         label="benign",
-        bssids=tuple(ap.bssid for ap in KNOWN_APS),
-        ssids=tuple(ap.ssid for ap in KNOWN_APS),
-        clients=LAB_CLIENTS,
+        bssids=(tuple(ap.bssid for ap in KNOWN_APS) + ((NOISY_NEW_AP_BSSID,) if noisy else ())),
+        ssids=(tuple(ap.ssid for ap in KNOWN_APS) + ((NOISY_NEW_AP_SSID,) if noisy else ())),
+        clients=(
+            tuple(dict.fromkeys((*LAB_CLIENTS, NOISY_ROAMING_CLIENT))) if noisy else LAB_CLIENTS
+        ),
         start=_timestamp(0),
         end=_timestamp(duration),
         packet_count=len(packets),
@@ -221,9 +236,80 @@ def _benign(seed: int) -> tuple[list[object], ScenarioLabels]:
             "duration_seconds": duration,
             "beacon_jitter_ms": BENIGN_BEACON_JITTER_MS,
             "access_points": len(KNOWN_APS),
+            "roaming_client": NOISY_ROAMING_CLIENT if noisy else None,
+            "restarting_bssid": KNOWN_APS[2].bssid if noisy else None,
+            "restart_gap_seconds": 17.0 if noisy else 0.0,
+            "new_ap_bssid": NOISY_NEW_AP_BSSID if noisy else None,
         },
     )
     return packets, labels
+
+
+def _append_noisy_benign(
+    packets: list[object],
+    rng: random.Random,
+    duration: float,
+    sequences: dict[str, int],
+    probe_sequence: int,
+) -> None:
+    """Add legitimate roaming, an AP restart, and a newly deployed AP."""
+    roaming = NOISY_ROAMING_CLIENT
+    for index, seconds in enumerate((90.0, 260.0, 500.0)):
+        ssid = "LabNet" if index != 1 else "LabGuest"
+        ap = next(item for item in KNOWN_APS if item.ssid == ssid)
+        packets.append(_stamp(_probe_request(roaming, probe_sequence, ssid), seconds))
+        probe_sequence += 1
+        packets.append(
+            _stamp(
+                _probe_response(ap, roaming, probe_sequence, ssid, ap.rssi - 2),
+                seconds + 0.04,
+            )
+        )
+        probe_sequence += 1
+
+    restart_start = 275.0
+    restart_end = 292.0
+    restarting = KNOWN_APS[2]
+
+    def _source(packet: object) -> str | None:
+        dot11 = packet.getlayer(Dot11)
+        return getattr(dot11, "addr2", None) if dot11 is not None else None
+
+    packets[:] = [
+        packet
+        for packet in packets
+        if not (_source(packet) == restarting.bssid and float(packet.time) >= restart_start)
+    ]
+    sequences[restarting.bssid] = 0
+    for index in range(int(duration - restart_end)):
+        packets.append(
+            _stamp(
+                _build_beacon(
+                    restarting,
+                    sequences[restarting.bssid],
+                    restarting.beacon_interval + rng.randint(-10, 10),
+                    restarting.rssi + rng.randint(-3, 3),
+                ),
+                restart_end + 1.0 + index + rng.uniform(-0.02, 0.02),
+            )
+        )
+        sequences[restarting.bssid] += 1
+
+    new_ap = AccessPoint(NOISY_NEW_AP_BSSID, NOISY_NEW_AP_SSID, 36, "001122", -48)
+    new_ap_start = 420.0
+    for new_ap_sequence, sequence in enumerate(range(int(duration - new_ap_start) - 1)):
+        seconds = new_ap_start + sequence
+        packets.append(
+            _stamp(
+                _build_beacon(
+                    new_ap,
+                    new_ap_sequence,
+                    new_ap.beacon_interval + rng.randint(-10, 10),
+                    new_ap.rssi + rng.randint(-3, 3),
+                ),
+                seconds,
+            )
+        )
 
 
 def _evil_twin(seed: int) -> tuple[list[object], ScenarioLabels]:
@@ -363,20 +449,131 @@ def _beacon_anomaly(seed: int) -> tuple[list[object], ScenarioLabels]:
     return packets, labels
 
 
+def _noisy_benign(seed: int) -> tuple[list[object], ScenarioLabels]:
+    return _benign(seed, noisy=True)
+
+
+def _low_slow_deauth(seed: int) -> tuple[list[object], ScenarioLabels]:
+    rng = random.Random(seed + 6)
+    packets: list[object] = []
+    start_second = 20.0
+    for index in range(12):
+        packets.append(
+            _stamp(
+                _radio(6, -44 + rng.randint(-2, 2))
+                / Dot11(
+                    type=0,
+                    subtype=12,
+                    addr1=SLOW_DEAUTH_CLIENT,
+                    addr2=SLOW_DEAUTH_BSSID,
+                    addr3=SLOW_DEAUTH_BSSID,
+                    SC=(2600 + index) << 4,
+                )
+                / Dot11Deauth(reason=7),
+                start_second + index * 12.0,
+            )
+        )
+    packets.sort(key=lambda packet: float(packet.time))
+    labels = ScenarioLabels(
+        scenario="low_slow_deauth",
+        attack_family="deauth_disassoc_anomaly",
+        label="suspicious_low_rate",
+        bssids=(SLOW_DEAUTH_BSSID,),
+        ssids=(),
+        clients=(SLOW_DEAUTH_CLIENT,),
+        start=_timestamp(start_second),
+        end=_timestamp(start_second + 132),
+        packet_count=len(packets),
+        details={
+            "frames_total": 12,
+            "spread_seconds": 132,
+            "frames_per_second": 12 / 132,
+            "burst_threshold_frames": 6,
+            "expected": "may miss",
+        },
+    )
+    return packets, labels
+
+
+def _evil_twin_matching_oui(seed: int) -> tuple[list[object], ScenarioLabels]:
+    rng = random.Random(seed + 7)
+    twin = AccessPoint(
+        SMART_TWIN_BSSID,
+        SMART_TWIN_SSID,
+        6,
+        "001122",
+        -28,
+        beacon_interval=1000,
+    )
+    packets: list[object] = []
+    start_second = 15.0
+    for index in range(12):
+        packets.append(
+            _stamp(
+                _build_beacon(
+                    twin,
+                    3200 + index,
+                    twin.beacon_interval + rng.randint(-2, 2),
+                    twin.rssi,
+                ),
+                start_second + index * 1.0,
+            )
+        )
+    packets.sort(key=lambda packet: float(packet.time))
+    labels = ScenarioLabels(
+        scenario="evil_twin_matching_oui",
+        attack_family="evil_twin_rogue_ap",
+        label="suspicious_matching_oui",
+        bssids=(twin.bssid,),
+        ssids=(twin.ssid,),
+        clients=(),
+        start=_timestamp(start_second),
+        end=_timestamp(start_second + 15),
+        packet_count=len(packets),
+        details={
+            "legit_bssid": KNOWN_APS[0].bssid,
+            "twin_bssid": twin.bssid,
+            "oui_match": True,
+            "channel_match": True,
+            "rssi_delta": twin.rssi - KNOWN_APS[0].rssi,
+            "untrusted_bssid": True,
+            "expected": "only duplicate-SSID or RSSI evidence may fire",
+        },
+    )
+    return packets, labels
+
+
 SCENARIOS = {
     "benign_baseline": _benign,
     "evil_twin": _evil_twin,
     "deauth_burst": _deauth_burst,
     "karma_probe_responses": _karma,
     "beacon_sequence_anomaly": _beacon_anomaly,
+    "benign_noisy": _noisy_benign,
+    "low_slow_deauth": _low_slow_deauth,
+    "evil_twin_matching_oui": _evil_twin_matching_oui,
 }
 MIXED_ATTACKS = {
     "mixed_evil_twin": "evil_twin",
     "mixed_deauth_burst": "deauth_burst",
     "mixed_karma_probe_responses": "karma_probe_responses",
     "mixed_beacon_sequence_anomaly": "beacon_sequence_anomaly",
+    "mixed_low_slow_deauth": "low_slow_deauth",
+    "mixed_evil_twin_matching_oui": "evil_twin_matching_oui",
 }
 MIXED_ATTACK_START_SECONDS = 300.0
+# Labeled attack window tolerance used by evaluation and end-to-end tests.
+ATTACK_WINDOW_TOLERANCE_SECONDS = 10.0
+BENIGN_NOISY_DURATION_SECONDS = BENIGN_DURATION_SECONDS
+# Noisy benign is an isolated false-positive challenge capture.
+EXPECTED_ALERT_FAMILY = {
+    "mixed_evil_twin": "evil_twin_rogue_ap",
+    "mixed_deauth_burst": "deauth_disassoc_anomaly",
+    "mixed_karma_probe_responses": "probe_response_karma",
+    "mixed_beacon_sequence_anomaly": "beacon_management_anomaly",
+    "mixed_low_slow_deauth": "deauth_disassoc_anomaly",
+    "mixed_evil_twin_matching_oui": "evil_twin_rogue_ap",
+}
 
 
 def _shift_packet(packet: object, seconds: float) -> object:
@@ -458,3 +655,7 @@ def generate_dataset(out_dir: str | Path, seed: int = SEED) -> list[GeneratedSce
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     return generated
+
+
+BENIGN_SCENARIOS = ("benign_baseline", "benign_noisy")
+MIXED_SCENARIO_NAMES = tuple(MIXED_ATTACKS)

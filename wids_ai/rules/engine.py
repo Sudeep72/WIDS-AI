@@ -173,7 +173,7 @@ def _frame_values(
         bool(known_ap and known_ap.security)
         and any(mode not in known_ap.security for mode in security)
     )
-    unknown_ouis = tuple(bssid.split(":", maxsplit=3)[0] for bssid in unknown)
+    unknown_ouis = tuple("".join(bssid.split(":")[:3]) for bssid in unknown)
     known_channels = sorted(known_ap.channels) if known_ap is not None else []
     reasons = Counter(
         frame.reason_code
