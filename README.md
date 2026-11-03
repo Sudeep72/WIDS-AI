@@ -43,6 +43,12 @@ were validated for the local runtime. NumPy 2.3.5, SciPy 1.17.1, and pandas 2.3.
 are the common pins that preserve Python 3.11 support without version-specific
 requirements files.
 
+## NanoSIEM export
+
+NanoSIEM export is disabled by default. Use `--siem-file` or `--siem-url` with
+`analyze` or `serve --replay`. See `docs/NANOSIEM_INTEGRATION.md` for the event
+contract, secure HTTP behavior, validation tool, and Sigma examples.
+
 ## Safety boundary
 This project is defensive only. It does not contain frame injection, deauthentication
 sending, or any transmit function. Synthetic fixtures are written to PCAP files only.
