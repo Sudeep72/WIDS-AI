@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -37,6 +38,7 @@ LOGGER = logging.getLogger(__name__)
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="wids-ai", description="Wireless intrusion detection")
     parser.add_argument("--config", type=Path, default=None, help="Path to YAML configuration")
+    parser.add_argument("--debug", action="store_true", help="Show full tracebacks on errors")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -51,6 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         command = subparsers.add_parser(name, help=help_text)
         command.add_argument("--config", dest="command_config", type=Path, default=None)
+        command.add_argument(
+            "--debug", dest="command_debug", action="store_true", help=argparse.SUPPRESS
+        )
         if name in {"analyze"}:
             command.add_argument("pcap", type=Path)
             command.add_argument("--inventory", type=Path)
@@ -133,14 +138,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 0
 
+    debug = args.debug or getattr(args, "command_debug", False)
     config_path = args.command_config or args.config
-    settings = load_config(config_path)
+    try:
+        settings = load_config(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        if debug:
+            raise
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     configure_logging(settings)
 
     if args.command == "baseline":
         if args.live:
-            source = LiveSource(args.iface)
-            inventory = build_live_inventory(source, duration=args.duration, yes=args.yes)
+            try:
+                source = LiveSource(args.iface)
+                inventory = build_live_inventory(source, duration=args.duration, yes=args.yes)
+            except LiveCaptureUnavailable as exc:
+                if debug:
+                    raise
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
         else:
             if args.pcap is None:
                 parser.error("baseline requires a PCAP path unless --live is used")
@@ -206,14 +224,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "train":
         if args.live:
-            source = LiveSource(args.iface)
-            captured, _errors, _sink = capture_frames(source, duration=args.duration)
-            if not captured:
-                raise LiveCaptureUnavailable("No frames captured; check monitor mode and channel")
-            feature_frame = batch_extract(captured, WindowConfig(10, 5))
-            rows = [
-                FeatureRow.model_validate(item.to_dict()) for _, item in feature_frame.iterrows()
-            ]
+            try:
+                source = LiveSource(args.iface)
+                captured, _errors, _sink = capture_frames(source, duration=args.duration)
+                if not captured:
+                    raise LiveCaptureUnavailable(
+                        "No frames captured; check monitor mode and channel"
+                    )
+                feature_frame = batch_extract(captured, WindowConfig(10, 5))
+                rows = [
+                    FeatureRow.model_validate(item.to_dict())
+                    for _, item in feature_frame.iterrows()
+                ]
+            except LiveCaptureUnavailable as exc:
+                if debug:
+                    raise
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
         else:
             if args.pcap is None:
                 parser.error("train requires a PCAP path unless --live is used")
@@ -315,35 +342,42 @@ def main(argv: Sequence[str] | None = None) -> int:
         uvicorn.run(create_app(database), host=settings.api.host, port=settings.api.port)
         return 0
     if args.command == "live":
-        database = Database(args.db)
-        source = LiveSource(args.iface, args.channel)
-        hop = tuple(int(item) for item in args.hop_channels.split(",")) if args.hop_channels else ()
-        exporter = build_siem_exporter(
-            database,
-            settings,
-            file_path=args.siem_file,
-            url=args.siem_url,
-            token_env=args.siem_token_env,
-            sensor_name=args.siem_sensor_name,
-        )
+        database = None
+        exporter = None
         server = None
-        if args.serve:
-            import threading
-
-            import uvicorn
-
-            from wids_ai.api.main import create_app
-
-            config = uvicorn.Config(
-                create_app(database),
-                host=settings.api.host,
-                port=settings.api.port,
-                log_level="info",
-            )
-            server = uvicorn.Server(config)
-            thread = threading.Thread(target=server.run, daemon=True, name="wids-api")
-            thread.start()
+        source = None
         try:
+            database = Database(args.db)
+            source = LiveSource(args.iface, args.channel)
+            hop = (
+                tuple(int(item) for item in args.hop_channels.split(","))
+                if args.hop_channels
+                else ()
+            )
+            exporter = build_siem_exporter(
+                database,
+                settings,
+                file_path=args.siem_file,
+                url=args.siem_url,
+                token_env=args.siem_token_env,
+                sensor_name=args.siem_sensor_name,
+            )
+            if args.serve:
+                import threading
+
+                import uvicorn
+
+                from wids_ai.api.main import create_app
+
+                config = uvicorn.Config(
+                    create_app(database),
+                    host=settings.api.host,
+                    port=settings.api.port,
+                    log_level="info",
+                )
+                server = uvicorn.Server(config)
+                thread = threading.Thread(target=server.run, daemon=True, name="wids-api")
+                thread.start()
             result = run_live(
                 source,
                 database=database,
@@ -366,13 +400,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 while thread.is_alive():
                     thread.join(timeout=1.0)
         except KeyboardInterrupt:
-            source.stop()
+            if source is not None:
+                source.stop()
+        except LiveCaptureUnavailable as exc:
+            if debug:
+                raise
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
         finally:
             if server is not None:
                 server.should_exit = True
             if exporter is not None:
                 exporter.close()
-            database.close()
+            if database is not None:
+                database.close()
         return 0
     LOGGER.info("Command %s is scaffolded; implementation lands in later milestones", args.command)
     return 0
