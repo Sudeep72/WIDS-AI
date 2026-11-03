@@ -69,6 +69,7 @@ def replay_pcap(
     loop: bool = False,
     fresh: bool = True,
     sleep: bool = True,
+    on_alerts=None,
 ) -> ReplayResult:
     """Replay a PCAP and persist alerts as each simulated window closes."""
     source = Path(pcap)
@@ -145,6 +146,11 @@ def replay_pcap(
             for start, values in sorted(score_windows.items())
         ],
     )
+    if on_alerts is not None:
+        try:
+            on_alerts(alerts)
+        except Exception as exc:
+            LOGGER.warning("Downstream alert handler failed: %s", type(exc).__name__)
     database.finish_run(run_id, len(frame_rows), len(feature_rows))
     LOGGER.info("Replay wrote %d alerts from %d frames", len(alerts), len(frame_rows))
     return ReplayResult(frames=len(frame_rows), windows=len(feature_rows), alerts=len(alerts))

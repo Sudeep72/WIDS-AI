@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator
@@ -74,13 +75,19 @@ class SIEMConfig(BaseModel):
     enabled: bool = False
     file_path: Path = Path("data/siem/events.jsonl")
     http_endpoint: str | None = None
+    token_env: str = "NANOSIEM_TOKEN"
+    sensor_name: str | None = None
     timeout_seconds: PositiveInt = 5
 
     @field_validator("http_endpoint")
     @classmethod
     def validate_http_endpoint(cls, value: str | None) -> str | None:
-        if value is not None and not value.startswith(("http://", "https://")):
-            raise ValueError("http_endpoint must start with http:// or https://")
+        if value is None:
+            return None
+        parsed = urlsplit(value)
+        local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1"}
+        if not parsed.hostname or (parsed.scheme != "https" and not local_http):
+            raise ValueError("http_endpoint must use HTTPS unless localhost")
         return value
 
 

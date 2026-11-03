@@ -11,7 +11,7 @@ from pathlib import Path
 from wids_ai import __version__
 from wids_ai.capture.base import PcapSource
 from wids_ai.capture.live_source import LiveSource
-from wids_ai.config import PROJECT_ROOT, load_config
+from wids_ai.config import PROJECT_ROOT, Settings, load_config
 from wids_ai.correlation.scorer import CorrelationConfig, correlate
 from wids_ai.features.extractors import FeatureRow, batch_extract
 from wids_ai.features.windowing import WindowConfig
@@ -28,6 +28,7 @@ from wids_ai.ml.isolation_forest import (
 from wids_ai.parser.dot11 import parse_frame
 from wids_ai.replay import replay_pcap
 from wids_ai.rules.engine import deduplicate, evaluate_rules, load_rules
+from wids_ai.siem.exporter import FileSink, HttpSink, NanoSIEMExporter
 from wids_ai.storage.db import Database
 
 LOGGER = logging.getLogger(__name__)
@@ -59,12 +60,20 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--trusted-model-root", type=Path, default=PROJECT_ROOT / "models")
             command.add_argument("--window-seconds", type=float, default=10.0)
             command.add_argument("--step-seconds", type=float, default=5.0)
+            command.add_argument("--siem-file", type=Path)
+            command.add_argument("--siem-url")
+            command.add_argument("--siem-token-env")
+            command.add_argument("--siem-sensor-name")
         if name == "train":
             command.add_argument("pcap", type=Path)
             command.add_argument("--out", type=Path, default=Path("models"))
             command.add_argument("--seed", type=int, default=42)
             command.add_argument("--contamination", type=float, default=0.05)
         if name == "serve":
+            command.add_argument("--siem-file", type=Path)
+            command.add_argument("--siem-url")
+            command.add_argument("--siem-token-env")
+            command.add_argument("--siem-sensor-name")
             command.add_argument("--replay", type=Path)
             command.add_argument("--speed", type=float, default=20.0)
             command.add_argument("--inventory", type=Path)
@@ -155,6 +164,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"{alert.risk_score:<5} {alert.family:<32} {technique:<8} "
                 f"{alert.severity:<14} {','.join(alert.bssids)}"
             )
+        if settings.siem.enabled or args.siem_file is not None or args.siem_url is not None:
+            with Database(settings.storage.database_path) as export_db:
+                export_alerts(
+                    alerts,
+                    export_db,
+                    settings,
+                    file_path=args.siem_file,
+                    url=args.siem_url,
+                    token_env=args.siem_token_env,
+                    sensor_name=args.siem_sensor_name,
+                )
         print(f"Alerts -> {args.out}")
         return 0
     if args.command == "features":
@@ -214,20 +234,48 @@ def main(argv: Sequence[str] | None = None) -> int:
                     LOGGER.info(
                         "No inventory supplied; building one from benign frames is required"
                     )
-            result = replay_pcap(
-                args.replay,
+            exporter = build_siem_exporter(
                 database,
-                inventory_path=inventory_path if inventory_path.exists() else None,
-                model_root=args.model,
-                rules_dir=args.rules,
-                trusted_model_root=args.trusted_model_root,
-                speed=args.speed,
-                loop=args.loop,
-                fresh=args.fresh,
+                settings,
+                file_path=args.siem_file,
+                url=args.siem_url,
+                token_env=args.siem_token_env,
+                sensor_name=args.siem_sensor_name,
             )
+
+            failed_alerts = []
+
+            def export_replay_alerts(replay_alerts):
+                if exporter is not None:
+                    try:
+                        exporter.export(replay_alerts)
+                        failed_alerts.extend(exporter.failed)
+                    except Exception as exc:
+                        LOGGER.warning("SIEM export failed: %s", type(exc).__name__)
+                        print(f"SIEM export failed: {type(exc).__name__}")
+                        failed_alerts.extend(replay_alerts)
+
+            try:
+                result = replay_pcap(
+                    args.replay,
+                    database,
+                    inventory_path=inventory_path if inventory_path.exists() else None,
+                    model_root=args.model,
+                    rules_dir=args.rules,
+                    trusted_model_root=args.trusted_model_root,
+                    speed=args.speed,
+                    loop=args.loop,
+                    fresh=args.fresh,
+                    on_alerts=export_replay_alerts,
+                )
+            finally:
+                if exporter is not None:
+                    exporter.close()
             print(
                 f"Replay: {result.frames} frames, {result.windows} feature rows, {result.alerts} alerts"
             )
+            if failed_alerts:
+                print(f"SIEM export failed: {len(failed_alerts)} alert states not exported")
             print(f"Inventory: {inventory_path}")
         import uvicorn
 
@@ -242,6 +290,86 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     LOGGER.info("Command %s is scaffolded; implementation lands in later milestones", args.command)
     return 0
+
+
+def build_siem_exporter(
+    database: Database,
+    settings: Settings,
+    *,
+    file_path: Path | None = None,
+    url: str | None = None,
+    token_env: str | None = None,
+    sensor_name: str | None = None,
+) -> NanoSIEMExporter | None:
+    """Build enabled sinks without allowing exporter setup to stop analysis."""
+    config = settings.siem
+    configured = file_path is None and url is None and config.enabled
+    selected_file = (
+        file_path if file_path is not None else (config.file_path if configured else None)
+    )
+    selected_url = url if url is not None else (config.http_endpoint if configured else None)
+    if selected_file is None and selected_url is None:
+        return None
+    sinks = []
+    if selected_file is not None:
+        try:
+            sinks.append(FileSink(selected_file))
+        except Exception as exc:
+            LOGGER.warning("SIEM file sink unavailable: %s", type(exc).__name__)
+            print(f"SIEM export failed: file sink unavailable: {type(exc).__name__}")
+    if selected_url is not None:
+        try:
+            sinks.append(
+                HttpSink(
+                    selected_url,
+                    token_env=token_env or config.token_env,
+                    timeout=float(config.timeout_seconds),
+                    failure_callback=print,
+                )
+            )
+        except Exception as exc:
+            LOGGER.warning("SIEM HTTP sink unavailable: %s", type(exc).__name__)
+            print(f"SIEM export failed: HTTP sink unavailable: {type(exc).__name__}")
+    if not sinks:
+        LOGGER.warning("SIEM export disabled because no sink could be started")
+        print("SIEM export failed: no sink could be started")
+        return None
+    return NanoSIEMExporter(
+        database,
+        sinks,
+        sensor_name=sensor_name or config.sensor_name,
+        failure_callback=print,
+    )
+
+
+def export_alerts(
+    alerts,
+    database: Database,
+    settings: Settings,
+    *,
+    file_path: Path | None = None,
+    url: str | None = None,
+    token_env: str | None = None,
+    sensor_name: str | None = None,
+) -> int:
+    exporter = build_siem_exporter(
+        database,
+        settings,
+        file_path=file_path,
+        url=url,
+        token_env=token_env,
+        sensor_name=sensor_name,
+    )
+    if exporter is None:
+        return 0
+    try:
+        return exporter.export(alerts)
+    except Exception as exc:
+        LOGGER.warning("SIEM export failed: %s", type(exc).__name__)
+        print(f"SIEM export failed: {type(exc).__name__}")
+        return 0
+    finally:
+        exporter.close()
 
 
 def parse_frames(source: PcapSource | LiveSource):

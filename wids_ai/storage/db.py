@@ -14,7 +14,7 @@ from typing import Any
 from wids_ai.correlation.schema import Alert
 from wids_ai.inventory import APInventory
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DDL = (
     """
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -89,6 +89,12 @@ DDL = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS exported_states (
+        event_key TEXT PRIMARY KEY,
+        exported_at TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS frame_summaries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         run_id INTEGER,
@@ -136,6 +142,19 @@ class Database:
             connection.execute("PRAGMA foreign_keys = ON")
             self._local.connection = connection
         return connection
+
+    def close(self) -> None:
+        """Close this thread's connection and release Windows file handles."""
+        connection = getattr(self._local, "connection", None)
+        if connection is not None:
+            connection.close()
+            self._local.connection = None
+
+    def __enter__(self) -> Database:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -267,6 +286,21 @@ class Database:
                     json.dumps(list(alert.clients)),
                     json.dumps(payload),
                 ),
+            )
+
+    def was_exported(self, event_key: str) -> bool:
+        row = (
+            self.connection()
+            .execute("SELECT 1 FROM exported_states WHERE event_key = ?", (event_key,))
+            .fetchone()
+        )
+        return row is not None
+
+    def mark_exported(self, event_key: str) -> None:
+        with self.transaction() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO exported_states(event_key, exported_at) VALUES (?, ?)",
+                (event_key, datetime.now(tz=UTC).isoformat()),
             )
 
     def save_ml_scores(self, run_id: int, scores: list[dict[str, Any]]) -> None:

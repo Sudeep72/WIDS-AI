@@ -34,6 +34,8 @@ siem:
   enabled: false
   file_path: data/siem/events.jsonl
   http_endpoint: null
+  token_env: NANOSIEM_TOKEN
+  sensor_name: null
   timeout_seconds: 5
 
 api:
