@@ -147,19 +147,26 @@ function evidenceText(item) {
 }
 
 function detailList(title, items) {
-  const wrapper = document.createElement("div");
-  const heading = document.createElement("h4");
-  setText(heading, title);
-  wrapper.append(heading);
-  const list = document.createElement("ul");
-  (items || []).forEach((item) => {
-    const li = document.createElement("li");
-    setText(li, evidenceText(item));
-    list.append(li);
-  });
-  wrapper.append(list);
-  return wrapper;
-}
+    const wrapper = document.createElement("div");
+    const heading = document.createElement("h4");
+    setText(heading, title);
+    wrapper.append(heading);
+    if (!items || items.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      setText(empty, "None evaluated");
+      wrapper.append(empty);
+      return wrapper;
+    }
+    const list = document.createElement("ul");
+    items.forEach((item) => {
+      const li = document.createElement("li");
+      setText(li, evidenceText(item));
+      list.append(li);
+    });
+    wrapper.append(list);
+    return wrapper;
+  }
 
 function buildAlertItem(alert) {
   const item = document.createElement("li");
