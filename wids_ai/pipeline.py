@@ -51,6 +51,14 @@ def parse_pcap(pcap: str | Path) -> list[Frame]:
     ]
 
 
+def parse_live_packet(packet, arrival: float):
+    """Parse a live packet with capture arrival time as its timestamp."""
+    from datetime import UTC, datetime
+
+    captured = datetime.fromtimestamp(arrival, tz=UTC)
+    return parse_frame(packet, captured_at=captured)
+
+
 def build_inventory(pcap: str | Path) -> APInventory:
     """Learn trusted APs from one benign PCAP."""
     return APInventory.from_frames(parse_pcap(pcap))

@@ -275,6 +275,9 @@ async function refresh() {
     load("stats", "/api/stats", (stats) => {
       setText(byId("stat-frames"), stats.frames_processed);
       setText(byId("stat-windows"), stats.windows);
+      setText(byId("stat-fps"), Number(stats.frames_per_second || 0).toFixed(2));
+      setText(byId("stat-parse-errors"), stats.parse_errors || 0);
+      setText(byId("stat-dropped"), stats.dropped || 0);
       setText(byId("run-id"), stats.run_id === null ? "-" : stats.run_id);
       setText(byId("run-started"), stats.run_started_at || "-");
       renderCounts(byId("severity-counts"), stats.alerts_by_severity);

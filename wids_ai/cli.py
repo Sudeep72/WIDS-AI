@@ -10,12 +10,13 @@ from pathlib import Path
 
 from wids_ai import __version__
 from wids_ai.capture.base import PcapSource
-from wids_ai.capture.live_source import LiveSource
+from wids_ai.capture.live_source import LiveCaptureUnavailable, LiveSource
 from wids_ai.config import PROJECT_ROOT, Settings, load_config
 from wids_ai.correlation.scorer import CorrelationConfig
-from wids_ai.features.extractors import batch_extract
+from wids_ai.features.extractors import FeatureRow, batch_extract
 from wids_ai.features.windowing import WindowConfig
 from wids_ai.inventory import APInventory
+from wids_ai.live import build_live_inventory, capture_frames, run_live
 from wids_ai.logging_config import configure_logging
 from wids_ai.ml.baseline import load_benign_rows
 from wids_ai.ml.isolation_forest import (
@@ -64,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--siem-token-env")
             command.add_argument("--siem-sensor-name")
         if name == "train":
-            command.add_argument("pcap", type=Path)
+            command.add_argument("pcap", type=Path, nargs="?")
             command.add_argument("--out", type=Path, default=Path("models"))
             command.add_argument("--seed", type=int, default=42)
             command.add_argument("--contamination", type=float, default=0.05)
@@ -91,7 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--window-seconds", type=float, default=10.0)
             command.add_argument("--step-seconds", type=float, default=5.0)
         if name == "baseline":
-            command.add_argument("pcap", type=Path)
+            command.add_argument("pcap", type=Path, nargs="?")
             command.add_argument("--out", type=Path, required=True)
         if name == "features":
             command.add_argument("pcap", type=Path)
@@ -101,6 +102,26 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "live":
             command.add_argument("--iface", default="wlan0mon")
             command.add_argument("--channel", type=int, default=6)
+            command.add_argument("--write-pcap", type=Path)
+            command.add_argument("--db", type=Path, default=Path("data/wids.db"))
+            command.add_argument("--inventory", type=Path, default=Path("data/inventory.json"))
+            command.add_argument("--siem-file", type=Path)
+            command.add_argument("--siem-url")
+            command.add_argument("--siem-token-env")
+            command.add_argument("--siem-sensor-name")
+            command.add_argument("--serve", action="store_true")
+            command.add_argument("--duration", type=float, default=None)
+            command.add_argument("--hop-channels")
+            command.add_argument("--hop-interval", type=float, default=0.5)
+        if name == "baseline":
+            command.add_argument("--live", action="store_true")
+            command.add_argument("--iface", default="wlan0mon")
+            command.add_argument("--duration", type=float, default=300.0)
+            command.add_argument("--yes", action="store_true")
+        if name == "train":
+            command.add_argument("--live", action="store_true")
+            command.add_argument("--iface", default="wlan0mon")
+            command.add_argument("--duration", type=float, default=600.0)
 
     return parser
 
@@ -117,8 +138,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(settings)
 
     if args.command == "baseline":
-        frame_rows = list(parse_frames(PcapSource(args.pcap)))
-        inventory = APInventory.from_frames(frame_rows)
+        if args.live:
+            source = LiveSource(args.iface)
+            inventory = build_live_inventory(source, duration=args.duration, yes=args.yes)
+        else:
+            if args.pcap is None:
+                parser.error("baseline requires a PCAP path unless --live is used")
+            frame_rows = list(parse_frames(PcapSource(args.pcap)))
+            inventory = APInventory.from_frames(frame_rows)
         inventory.save(args.out)
         print(f"Learned {len(inventory.aps)} trusted APs -> {args.out}")
         for bssid, ap in sorted(inventory.aps.items()):
@@ -178,7 +205,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         LOGGER.info("Wrote %d feature rows to %s", len(features), args.out)
         return 0
     if args.command == "train":
-        rows = load_benign_rows(args.pcap)
+        if args.live:
+            source = LiveSource(args.iface)
+            captured, _errors, _sink = capture_frames(source, duration=args.duration)
+            if not captured:
+                raise LiveCaptureUnavailable("No frames captured; check monitor mode and channel")
+            feature_frame = batch_extract(captured, WindowConfig(10, 5))
+            rows = [
+                FeatureRow.model_validate(item.to_dict()) for _, item in feature_frame.iterrows()
+            ]
+        else:
+            if args.pcap is None:
+                parser.error("train requires a PCAP path unless --live is used")
+            rows = load_benign_rows(args.pcap)
         trained_models = []
         for scope in ("bssid", "client", "ssid"):
             scope_rows = [row for row in rows if row.scope == scope]
@@ -276,9 +315,64 @@ def main(argv: Sequence[str] | None = None) -> int:
         uvicorn.run(create_app(database), host=settings.api.host, port=settings.api.port)
         return 0
     if args.command == "live":
+        database = Database(args.db)
         source = LiveSource(args.iface, args.channel)
-        frames = parse_source(source)
-        LOGGER.info("Parsed %d live frames", frames)
+        hop = tuple(int(item) for item in args.hop_channels.split(",")) if args.hop_channels else ()
+        exporter = build_siem_exporter(
+            database,
+            settings,
+            file_path=args.siem_file,
+            url=args.siem_url,
+            token_env=args.siem_token_env,
+            sensor_name=args.siem_sensor_name,
+        )
+        server = None
+        if args.serve:
+            import threading
+
+            import uvicorn
+
+            from wids_ai.api.main import create_app
+
+            config = uvicorn.Config(
+                create_app(database),
+                host=settings.api.host,
+                port=settings.api.port,
+                log_level="info",
+            )
+            server = uvicorn.Server(config)
+            thread = threading.Thread(target=server.run, daemon=True, name="wids-api")
+            thread.start()
+        try:
+            result = run_live(
+                source,
+                database=database,
+                inventory=APInventory.load(args.inventory)
+                if args.inventory.is_file()
+                else APInventory(),
+                duration=args.duration,
+                write_pcap=args.write_pcap,
+                channel_hop=hop,
+                hop_interval=args.hop_interval,
+                export=(exporter.export if exporter else None),
+            )
+            print(
+                f"Live: {result.frames} frames, {result.windows} feature rows, "
+                f"{result.alerts} alerts, {result.parse_errors} parse errors, "
+                f"{result.dropped} dropped"
+            )
+            if server is not None and args.duration is None:
+                print(f"Dashboard: http://{settings.api.host}:{settings.api.port}")
+                while thread.is_alive():
+                    thread.join(timeout=1.0)
+        except KeyboardInterrupt:
+            source.stop()
+        finally:
+            if server is not None:
+                server.should_exit = True
+            if exporter is not None:
+                exporter.close()
+            database.close()
         return 0
     LOGGER.info("Command %s is scaffolded; implementation lands in later milestones", args.command)
     return 0

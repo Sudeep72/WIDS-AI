@@ -414,7 +414,13 @@ def run_seed(seed: int, work_root: Path) -> SeedArtifacts:
 
 
 def build_evaluation(work_root: Path, seeds: tuple[int, ...] = SEEDS) -> dict[str, Any]:
-    artifacts = [run_seed(seed, work_root) for seed in seeds]
+    from concurrent.futures import ProcessPoolExecutor
+
+    if len(seeds) > 1:
+        with ProcessPoolExecutor(max_workers=min(5, len(seeds))) as pool:
+            artifacts = list(pool.map(run_seed, seeds, [work_root] * len(seeds)))
+    else:
+        artifacts = [run_seed(seed, work_root) for seed in seeds]
     rows: list[dict[str, Any]] = []
     for item in artifacts:
         seed_rows = scenario_rows(item)
